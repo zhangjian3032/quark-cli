@@ -537,7 +537,10 @@ function TmdbSection({ config, onRefresh }) {
 function FeishuBotSection({ onRefresh }) {
   const [botConfig, setBotConfig] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [form, setForm] = useState({ app_id: '', app_secret: '', base_path: '/媒体' })
+  const [form, setForm] = useState({
+    app_id: '', app_secret: '', base_path: '/媒体',
+    notify_open_id: '', api_base: '',
+  })
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
   const [showSecret, setShowSecret] = useState(false)
@@ -546,7 +549,12 @@ function FeishuBotSection({ onRefresh }) {
     configApi.readBot()
       .then(d => {
         setBotConfig(d)
-        setForm(f => ({ ...f, base_path: d.base_path || '/媒体' }))
+        setForm(f => ({
+          ...f,
+          base_path: d.base_path || '/媒体',
+          notify_open_id: d.notify_open_id || '',
+          api_base: d.api_base || '',
+        }))
         setLoading(false)
       })
       .catch(() => setLoading(false))
@@ -556,14 +564,25 @@ function FeishuBotSection({ onRefresh }) {
     setSaving(true)
     setToast(null)
     try {
-      const payload = { base_path: form.base_path }
+      const payload = {
+        base_path: form.base_path,
+        notify_open_id: form.notify_open_id.trim(),
+        api_base: form.api_base.trim(),
+      }
       if (form.app_id.trim()) payload.app_id = form.app_id.trim()
       if (form.app_secret.trim()) payload.app_secret = form.app_secret.trim()
       await configApi.setBot(payload)
       setToast({ msg: '配置已保存', type: 'success' })
       setForm(f => ({ ...f, app_id: '', app_secret: '' }))
       // reload bot config
-      configApi.readBot().then(d => setBotConfig(d))
+      configApi.readBot().then(d => {
+        setBotConfig(d)
+        setForm(f => ({
+          ...f,
+          notify_open_id: d.notify_open_id || '',
+          api_base: d.api_base || '',
+        }))
+      })
       onRefresh()
     } catch (e) {
       setToast({ msg: e.message, type: 'error' })
@@ -618,11 +637,31 @@ function FeishuBotSection({ onRefresh }) {
           </div>
         </div>
         <div>
+          <label className="text-xs text-gray-500 mb-1 block">通知人 Open ID</label>
+          <input value={form.notify_open_id}
+            onChange={e => setForm({ ...form, notify_open_id: e.target.value })}
+            placeholder="ou_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            className={inputCls} />
+          <div className="text-[10px] text-gray-600 mt-1">
+            定时任务完成后私聊通知的用户，可在任务级别覆盖
+          </div>
+        </div>
+        <div>
           <label className="text-xs text-gray-500 mb-1 block">转存基准路径</label>
           <input value={form.base_path}
             onChange={e => setForm({ ...form, base_path: e.target.value })}
             placeholder="/媒体"
             className={inputCls} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-xs text-gray-500 mb-1 block">API Base URL（可选）</label>
+          <input value={form.api_base}
+            onChange={e => setForm({ ...form, api_base: e.target.value })}
+            placeholder="默认 https://open.feishu.cn"
+            className={inputCls} />
+          <div className="text-[10px] text-gray-600 mt-1">
+            飞书 API 基地址，国际版可改为 https://open.larksuite.com，留空使用默认值
+          </div>
         </div>
       </div>
 
@@ -650,6 +689,15 @@ function FeishuBotSection({ onRefresh }) {
           <div>• 指定年份：<span className="text-gray-300">沙丘 2024</span></div>
           <div>• 仅预览不转存：<span className="text-gray-300">dry:流浪地球2</span></div>
           <div>• 查看帮助：<span className="text-gray-300">help</span> / 查看状态：<span className="text-gray-300">status</span></div>
+        </div>
+      </div>
+
+      <div className="bg-surface-2 rounded-lg p-4 mb-4">
+        <div className="text-xs text-gray-400 mb-2">🔔 通知人 Open ID 获取方式</div>
+        <div className="text-xs text-gray-500 space-y-1">
+          <div>• 方式一：向机器人发送任意消息，在后台日志查看 <code className="text-gray-400">event.sender.sender_id.open_id</code></div>
+          <div>• 方式二：飞书管理后台 → 通讯录 → 成员详情 → Open ID</div>
+          <div>• 格式：<code className="text-gray-400">ou_</code> 开头的字符串</div>
         </div>
       </div>
 

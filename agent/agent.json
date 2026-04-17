@@ -5,7 +5,7 @@
   "description": "夸克网盘 CLI Agent - 签到/资源搜索/分享检查/转存/文件管理/影视媒体中心",
   "author": "quark-cli",
   "license": "AGPL-3.0",
-  "homepage": "https://github.com/Cp0204/quark-auto-save",
+  "homepage": "https://github.com/zhangjian3032/quark-cli",
   "runtime": {
     "type": "python",
     "python_version": ">=3.8",

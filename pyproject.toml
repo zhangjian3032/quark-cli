@@ -51,8 +51,8 @@ dev = [
 quark-cli = "quark_cli.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Cp0204/quark-auto-save"
-Documentation = "https://github.com/Cp0204/quark-auto-save/wiki"
+Homepage = "https://github.com/zhangjian3032/quark-cli"
+Documentation = "https://github.com/zhangjian3032/quark-cli/wiki"
 
 [tool.setuptools.packages.find]
 include = ["quark_cli*"]

@@ -25,7 +25,7 @@
     "save_base_path": "/媒体",
     "check_media_lib": true,        # 是否媒体库查重
     "bot_notify": true,             # 是否飞书通知
-    "bot_chat_id": ""               # 指定群聊 (空=不指定)
+    "notify_open_id": ""            # 通知人 open_id (空=使用全局配置)
   }
 """
 
@@ -51,7 +51,7 @@ DEFAULT_TASK = {
     "save_base_path": "/媒体",
     "check_media_lib": True,
     "bot_notify": True,
-    "bot_chat_id": "",
+    "notify_open_id": "",
 }
 
 
@@ -131,15 +131,19 @@ def run_discover_task(task_config, config_path=None):
 
     # ── Step 1: TMDB 发现 ──
     try:
-        from quark_cli.media.discovery.tmdb import TMDBSource
+        from quark_cli.media.discovery.tmdb import TmdbSource
 
-        tmdb_cfg = cfg.data.get("media", {}).get("tmdb", {})
-        tmdb_key = tmdb_cfg.get("api_key", "")
+        disc_cfg = cfg.data.get("media", {}).get("discovery", {})
+        tmdb_key = disc_cfg.get("tmdb_api_key", "")
         if not tmdb_key:
             result["error"] = "TMDB API Key 未配置"
             return result
 
-        tmdb = TMDBSource(api_key=tmdb_key)
+        tmdb = TmdbSource(
+            api_key=tmdb_key,
+            language=disc_cfg.get("language", "zh-CN"),
+            region=disc_cfg.get("region", "CN"),
+        )
         media_type = task.get("media_type", "movie")
         filters = task.get("filters", {})
         count = task.get("count", 3)
@@ -195,8 +199,16 @@ def run_discover_task(task_config, config_path=None):
     media_provider = None
     if task.get("check_media_lib", True):
         try:
-            from quark_cli.media.registry import get_provider
-            media_provider = get_provider(cfg)
+            from quark_cli.media.registry import create_provider
+            from quark_cli.media.fnos.config import FnosConfig
+            media_cfg = cfg.data.get("media", {})
+            provider_name = media_cfg.get("provider", "fnos")
+            if provider_name == "fnos":
+                fnos_data = media_cfg.get("fnos", {})
+                fnos_config = FnosConfig.from_dict(fnos_data)
+                fnos_config = FnosConfig.from_env(fnos_config)
+                fnos_config.validate()
+                media_provider = create_provider("fnos", fnos_config)
         except Exception:
             logger.debug("媒体库不可用，跳过查重")
 
@@ -216,7 +228,7 @@ def run_discover_task(task_config, config_path=None):
             result["error"] = "Cookie 失效"
             return result
 
-        searcher = PanSearch(cfg.data.get("search_sources", {}))
+        searcher = PanSearch(cfg)
         base_path = task.get("save_base_path", "/媒体")
 
     except Exception as e:
@@ -227,25 +239,32 @@ def run_discover_task(task_config, config_path=None):
         title = item.title
         year = item.year
 
-        # 媒体库查重
+        # 媒体库查重 (仅用纯标题搜索，不带年份括号)
         if media_provider:
             try:
-                search_result = media_provider.search_items(keyword=title, page=1, page_size=5)
+                # 搜索关键词只用标题，不加年份/括号
+                search_keyword = title.strip()
+                search_result = media_provider.search_items(keyword=search_keyword, page=1, page_size=10)
+                found_existing = False
                 if search_result.items:
-                    # 名称相近且年份匹配 → 认为已有
                     for existing in search_result.items:
-                        if (existing.title and title.lower() in existing.title.lower()
-                                and (not year or not existing.year or abs(existing.year - year) <= 1)):
-                            result["skipped_existing"] += 1
-                            logger.info("跳过已有: %s (%s)", title, year)
-                            break
-                    else:
-                        pass  # 没匹配上，继续
-                    if result["skipped_existing"] > len(result["saved"]) + len(result["failed"]):
-                        # 刚刚跳过了，继续下一个
-                        continue
-            except Exception:
-                pass
+                        ex_title = (existing.title or "").strip()
+                        # 标题模糊匹配 + 年份容差
+                        if ex_title and (
+                            title.lower() in ex_title.lower()
+                            or ex_title.lower() in title.lower()
+                        ):
+                            year_int = int(year) if year and str(year).isdigit() else 0
+                            ex_year = existing.year if hasattr(existing, "year") and existing.year else 0
+                            if not year_int or not ex_year or abs(int(ex_year) - year_int) <= 1:
+                                result["skipped_existing"] += 1
+                                logger.info("跳过已有: %s (%s) — 媒体库已存在: %s", title, year, ex_title)
+                                found_existing = True
+                                break
+                if found_existing:
+                    continue
+            except Exception as e:
+                logger.debug("媒体库查重异常: %s", e)
 
         result["attempted"] += 1
 
@@ -366,66 +385,93 @@ def format_notify_text(result):
     return {"zh_cn": {"title": title, "content": lines}}
 
 
-def send_bot_notify(config_path, result, chat_id=""):
-    """通过飞书机器人发送通知"""
+def _get_tenant_token(app_id, app_secret, api_base="https://open.feishu.cn"):
+    """获取 tenant_access_token"""
+    import requests
+    url = "{}/open-apis/auth/v3/tenant_access_token/internal".format(api_base)
+    resp = requests.post(url, json={"app_id": app_id, "app_secret": app_secret}, timeout=10)
+    data = resp.json()
+    if data.get("code") == 0 and data.get("tenant_access_token"):
+        return data["tenant_access_token"]
+    logger.error("获取 tenant_access_token 失败: %s", data.get("msg", ""))
+    return None
+
+
+def send_bot_notify(config_path, result, notify_open_id=""):
+    """
+    通过飞书 API 发送通知 (私聊方式, 不依赖 bot 进程)
+
+    发送方式: 用 tenant_access_token + open_id 向指定用户私聊
+    消息格式: 富文本 post
+    """
     import os
+    import json
+    import requests
     from quark_cli.config import ConfigManager
 
     cfg = ConfigManager(config_path)
     cfg.load()
-    bot_cfg = cfg.data.get("bot", {}).get("feishu", {})
+
+    # 读取 bot 配置 — 兼容 bot.feishu.xxx 和 bot.xxx
+    bot_data = cfg.data.get("bot", {})
+    bot_cfg = bot_data.get("feishu", bot_data)
 
     app_id = bot_cfg.get("app_id") or os.environ.get("FEISHU_APP_ID", "")
     app_secret = bot_cfg.get("app_secret") or os.environ.get("FEISHU_APP_SECRET", "")
 
     if not app_id or not app_secret:
-        logger.debug("飞书 Bot 未配置，跳过通知")
+        logger.info("飞书 Bot 未配置 app_id/app_secret，跳过通知")
         return False
 
+    # 确定通知人 — 优先任务级 → 全局配置级
+    open_id = (
+        notify_open_id
+        or bot_cfg.get("notify_open_id", "")
+        or os.environ.get("FEISHU_NOTIFY_OPEN_ID", "")
+    )
+    if not open_id:
+        logger.info("未配置通知人 open_id (bot.feishu.notify_open_id)，跳过通知")
+        return False
+
+    # API 域名: 支持内网 (bytedance) 和外网 (feishu)
+    api_base = bot_cfg.get("api_base", "") or os.environ.get("FEISHU_API_BASE", "")
+    if not api_base:
+        api_base = "https://open.feishu.cn"
+
+    # Step 1: 获取 tenant_access_token
+    token = _get_tenant_token(app_id, app_secret, api_base)
+    if not token:
+        return False
+
+    # Step 2: 发送消息
     try:
-        import lark_oapi as lark
-        from lark_oapi.api.im.v1 import (
-            CreateMessageRequest, CreateMessageRequestBody,
-        )
-        import json
-
-        client = lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
-
         content = format_notify_text(result)
-        msg_content = json.dumps(content)
+        msg_content = json.dumps(content, ensure_ascii=False)
 
-        # 确定接收者
-        receive_id = chat_id or bot_cfg.get("notify_chat_id", "")
-        if not receive_id:
-            logger.debug("未配置通知群聊 ID，跳过通知")
-            return False
+        url = "{}/open-apis/im/v1/messages?receive_id_type=open_id".format(api_base)
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer {}".format(token),
+        }
+        payload = {
+            "receive_id": open_id,
+            "msg_type": "post",
+            "content": msg_content,
+        }
 
-        request = (
-            CreateMessageRequest.builder()
-            .receive_id_type("chat_id")
-            .request_body(
-                CreateMessageRequestBody.builder()
-                .receive_id(receive_id)
-                .msg_type("post")
-                .content(msg_content)
-                .build()
-            )
-            .build()
-        )
+        logger.info("发送飞书通知 → open_id=%s", open_id)
+        resp = requests.post(url, headers=headers, json=payload, timeout=15)
+        data = resp.json()
 
-        response = client.im.v1.message.create(request)
-        if response.success():
+        if data.get("code") == 0:
             logger.info("飞书通知发送成功")
             return True
         else:
-            logger.error("飞书通知发送失败: %s", response.msg)
+            logger.error("飞书通知发送失败: code=%s, msg=%s", data.get("code"), data.get("msg"))
             return False
 
-    except ImportError:
-        logger.debug("lark-oapi 未安装，跳过通知")
-        return False
     except Exception as e:
-        logger.exception("发送飞书通知失败: %s", e)
+        logger.exception("发送飞书通知异常: %s", e)
         return False
 
 
@@ -513,7 +559,7 @@ class AutoDiscoverScheduler:
                 if result.get("saved") or result.get("failed") or result.get("error"):
                     send_bot_notify(
                         self.config_path, result,
-                        chat_id=task.get("bot_chat_id", ""),
+                        notify_open_id=task.get("notify_open_id", ""),
                     )
 
             logger.info("定时任务完成: %s (saved=%d, failed=%d)",

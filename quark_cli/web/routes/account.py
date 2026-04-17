@@ -252,6 +252,8 @@ class FeishuBotConfigBody(BaseModel):
     app_id: Optional[str] = None
     app_secret: Optional[str] = None
     base_path: Optional[str] = None
+    notify_open_id: Optional[str] = None
+    api_base: Optional[str] = None
 
 
 @router.get("/config/bot")
@@ -265,11 +267,15 @@ def config_bot_read():
 
         app_id = bot_cfg.get("app_id", "")
         app_secret = bot_cfg.get("app_secret", "")
+        notify_open_id = bot_cfg.get("notify_open_id", "")
+        api_base = bot_cfg.get("api_base", "")
 
         return {
             "app_id": "{}***".format(app_id[:6]) if len(app_id) > 6 else ("***" if app_id else ""),
             "app_secret": "***{}".format(app_secret[-6:]) if len(app_secret) > 6 else ("***" if app_secret else ""),
             "base_path": bot_cfg.get("base_path", "/媒体"),
+            "notify_open_id": notify_open_id,
+            "api_base": api_base,
             "configured": bool(app_id and app_secret),
         }
     except Exception as e:
@@ -293,6 +299,10 @@ def config_bot_set(body: FeishuBotConfigBody):
             feishu["app_secret"] = body.app_secret
         if body.base_path is not None:
             feishu["base_path"] = body.base_path
+        if body.notify_open_id is not None:
+            feishu["notify_open_id"] = body.notify_open_id
+        if body.api_base is not None:
+            feishu["api_base"] = body.api_base
 
         bot_cfg["feishu"] = feishu
         data["bot"] = bot_cfg

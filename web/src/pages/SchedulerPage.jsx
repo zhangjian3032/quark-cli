@@ -22,7 +22,7 @@ function TaskEditor({ task, onSave, onClose, genres }) {
     save_base_path: '/媒体',
     check_media_lib: true,
     bot_notify: true,
-    bot_chat_id: '',
+    notify_open_id: '',
     ...task,
   })
 
@@ -211,15 +211,15 @@ function TaskEditor({ task, onSave, onClose, genres }) {
             </label>
           </div>
 
-          {/* Bot Chat ID */}
+          {/* 通知人 */}
           {form.bot_notify && (
             <div>
-              <label className="text-[10px] text-gray-600 mb-1 block">通知群聊 ID (可选，空则使用默认)</label>
+              <label className="text-[10px] text-gray-600 mb-1 block">通知人 Open ID (可选，空则使用全局配置)</label>
               <input
                 type="text"
-                value={form.bot_chat_id}
-                onChange={e => set('bot_chat_id', e.target.value)}
-                placeholder="oc_xxxxxxxx"
+                value={form.notify_open_id}
+                onChange={e => set('notify_open_id', e.target.value)}
+                placeholder="ou_xxxxxxxx (飞书用户 Open ID)"
                 className="input text-xs w-full font-mono"
               />
             </div>

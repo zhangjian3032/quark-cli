@@ -49,7 +49,7 @@ def scheduler_task_create(data: dict = Body(...)):
         "save_base_path": data.get("save_base_path", "/媒体"),
         "check_media_lib": data.get("check_media_lib", True),
         "bot_notify": data.get("bot_notify", True),
-        "bot_chat_id": data.get("bot_chat_id", ""),
+        "notify_open_id": data.get("notify_open_id", ""),
     }
 
     # 检查名称唯一
@@ -76,7 +76,7 @@ def scheduler_task_update(index: int, data: dict = Body(...)):
     task = tasks[index]
     for key in ["name", "enabled", "interval_minutes", "cron", "media_type",
                 "count", "filters", "save_base_path", "check_media_lib",
-                "bot_notify", "bot_chat_id"]:
+                "bot_notify", "notify_open_id"]:
         if key in data:
             task[key] = data[key]
 

@@ -1,6 +1,6 @@
 # Quark CLI - 夸克网盘命令行工具
 
-基于 [quark-auto-save](https://github.com/Cp0204/quark-auto-save) 项目 API 封装的完整 CLI 工具。
+夸克网盘一站式管理工具 — 签到/搜索/转存/文件管理/影视中心/定时任务 + Web 面板。
 
 ## 功能特性
 
@@ -477,4 +477,8 @@ quark-cli --json account info
 
 基于 [AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html) 协议开源。
 
-参考项目：[quark-auto-save](https://github.com/Cp0204/quark-auto-save)
+
+
+## Reference
+
+- [quark-auto-save](https://github.com/Cp0204/quark-auto-save) — 夸克网盘自动追更转存工具，本项目的灵感来源

@@ -1,6 +1,6 @@
 """文件名正则替换 & 魔法重命名
 
-移植自 quark-auto-save 的 MagicRename，支持:
+正则重命名引擎 (MagicRename)，支持:
 - 魔法正则预设 ($TV / $BLACK_WORD / 自定义)
 - 魔法变量 ({TASKNAME} / {E} / {S} / {YEAR} / {DATE} / {I} 等)
 - 转存后批量 rename
