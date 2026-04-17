@@ -1,7 +1,6 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Film, Search, Star, Clapperboard, Activity, HardDrive, Globe, Settings } from 'lucide-react'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings } from 'lucide-react'
 import LibraryPage from './pages/LibraryPage'
-import SearchPage from './pages/SearchPage'
 import DetailPage from './pages/DetailPage'
 import DiscoverPage from './pages/DiscoverPage'
 import MetaPage from './pages/MetaPage'
@@ -23,7 +22,6 @@ const NAV_SECTIONS = [
     title: '影视中心',
     items: [
       { to: '/',         icon: Film,         label: '媒体库' },
-      { to: '/search',   icon: Search,       label: '搜索' },
       { to: '/discover', icon: Star,         label: '发现' },
       { to: '/meta',     icon: Clapperboard, label: '元数据' },
     ],
@@ -95,7 +93,6 @@ export default function App() {
           <Routes>
             <Route path="/" element={<LibraryPage />} />
             <Route path="/library/:libId" element={<LibraryPage />} />
-            <Route path="/search" element={<SearchPage />} />
             <Route path="/detail/:guid" element={<DetailPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
             <Route path="/discover/:tmdbId" element={<TmdbDetailPage />} />

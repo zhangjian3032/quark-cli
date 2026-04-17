@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 
 export function Spinner({ className = '' }) {
@@ -46,7 +47,25 @@ export function PageHeader({ title, description, children }) {
 }
 
 export function Pagination({ page, totalPages, onChange }) {
+  const [inputVal, setInputVal] = useState('')
+  const [editing, setEditing] = useState(false)
+
   if (totalPages <= 1) return null
+
+  const handleGo = () => {
+    const n = parseInt(inputVal, 10)
+    if (n >= 1 && n <= totalPages && n !== page) {
+      onChange(n)
+    }
+    setEditing(false)
+    setInputVal('')
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') handleGo()
+    if (e.key === 'Escape') { setEditing(false); setInputVal('') }
+  }
+
   return (
     <div className="flex items-center justify-center gap-2 mt-8">
       <button
@@ -56,9 +75,35 @@ export function Pagination({ page, totalPages, onChange }) {
       >
         上一页
       </button>
-      <span className="text-sm text-gray-500">
-        {page} / {totalPages}
-      </span>
+
+      {editing ? (
+        <div className="flex items-center gap-1.5">
+          <input
+            type="number"
+            min={1}
+            max={totalPages}
+            value={inputVal}
+            onChange={e => setInputVal(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onBlur={handleGo}
+            autoFocus
+            placeholder={String(page)}
+            className="w-16 px-2 py-1 text-sm text-center text-white bg-surface-2 border border-surface-3
+                       rounded focus:outline-none focus:border-brand-500
+                       [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          />
+          <span className="text-sm text-gray-500">/ {totalPages}</span>
+        </div>
+      ) : (
+        <button
+          onClick={() => { setEditing(true); setInputVal('') }}
+          className="text-sm text-gray-500 hover:text-brand-400 transition-colors cursor-pointer"
+          title="点击输入页码"
+        >
+          {page} / {totalPages}
+        </button>
+      )}
+
       <button
         onClick={() => onChange(page + 1)}
         disabled={page >= totalPages}

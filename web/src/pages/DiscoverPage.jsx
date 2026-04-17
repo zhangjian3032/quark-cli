@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw } from 'lucide-react'
+import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle } from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import MediaCard from '../components/MediaCard'
 import { PageSpinner, EmptyState, ErrorBanner, PageHeader, Pagination } from '../components/UI'
@@ -12,6 +12,7 @@ const LIST_TYPES = [
   { key: 'popular',   label: '热门', icon: Flame },
   { key: 'trending',  label: '趋势', icon: TrendingUp },
   { key: 'discover',  label: '筛选', icon: SlidersHorizontal },
+  { key: 'random',    label: '随机', icon: Shuffle },
 ]
 
 const MEDIA_TYPES = [
@@ -167,6 +168,28 @@ export default function DiscoverPage() {
     setError(null)
     setPage(p)
 
+    // 随机模式: 用 discover 接口 + 随机页码 + popularity 排序
+    if (listType === 'random') {
+      const randomPage = Math.floor(Math.random() * 20) + 1
+      const params = {
+        listType: 'discover',
+        mediaType,
+        page: randomPage,
+        sortBy: 'popularity.desc',
+      }
+      // 应用筛选条件 (如果有的话)
+      if (minRating) params.minRating = parseFloat(minRating)
+      if (genres.length > 0) params.genre = genres.join(',')
+      if (country) params.country = country
+      if (year) {
+        params.year = year.startsWith('decade_') ? parseInt(year.replace('decade_', '')) : parseInt(year)
+      }
+      discoveryApi.list(params)
+        .then(d => { setData(d); setLoading(false) })
+        .catch(e => { setError(e.message); setLoading(false) })
+      return
+    }
+
     const params = { listType, mediaType, page: p }
 
     if (listType === 'discover') {
@@ -179,8 +202,6 @@ export default function DiscoverPage() {
       if (year) {
         if (year.startsWith('decade_')) {
           const decade = parseInt(year.replace('decade_', ''))
-          // 用 min_rating 占位无法传年代范围, TMDB discover 只有单年
-          // 选年代时我们取年代中间年份附近的结果 — 简化为取该年代首年
           params.year = decade
         } else {
           params.year = parseInt(year)
@@ -193,7 +214,7 @@ export default function DiscoverPage() {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
-  // 非 discover 模式切换时自动刷新
+  // 非 discover 模式切换时自动刷新 (包括 random)
   useEffect(() => {
     if (listType !== 'discover') {
       doFetch(1)
@@ -240,7 +261,7 @@ export default function DiscoverPage() {
         />
 
         {/* ── discover 模式才显示以下筛选项 ── */}
-        {listType === 'discover' && (
+        {(listType === 'discover' || listType === 'random') && (
           <>
             {/* 类型 */}
             {genreOptions.length > 0 && (
@@ -287,9 +308,16 @@ export default function DiscoverPage() {
 
             {/* 操作按钮 */}
             <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
-              <button onClick={() => doFetch(1)} className="btn-primary text-sm">
-                筛选
-              </button>
+              {listType === 'random' ? (
+                <button onClick={() => doFetch(1)}
+                  className="btn-primary text-sm flex items-center gap-1.5">
+                  <Shuffle size={14} /> 换一批
+                </button>
+              ) : (
+                <button onClick={() => doFetch(1)} className="btn-primary text-sm">
+                  筛选
+                </button>
+              )}
               {hasFilters && (
                 <button onClick={handleReset}
                   className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-300 transition-colors">
@@ -318,7 +346,16 @@ export default function DiscoverPage() {
               />
             ))}
           </div>
-          <Pagination page={data.page} totalPages={data.total_pages} onChange={p => doFetch(p)} />
+          {listType === 'random' ? (
+            <div className="flex justify-center mt-8">
+              <button onClick={() => doFetch(1)}
+                className="btn-primary flex items-center gap-2">
+                <Shuffle size={16} /> 换一批
+              </button>
+            </div>
+          ) : (
+            <Pagination page={data.page} totalPages={data.total_pages} onChange={p => doFetch(p)} />
+          )}
         </>
       ) : (
         <EmptyState icon={Star} title="暂无结果" description="换个条件试试" />
