@@ -1,0 +1,199 @@
+{
+  "schema_version": "v1",
+  "name": "quark-drive",
+  "version": "1.0.0",
+  "description": "夸克网盘 CLI Agent - 签到/资源搜索/分享检查/转存/文件管理",
+  "author": "quark-cli",
+  "license": "AGPL-3.0",
+  "homepage": "https://github.com/Cp0204/quark-auto-save",
+  "runtime": {
+    "type": "python",
+    "python_version": ">=3.8",
+    "entry_point": "agent/main.py",
+    "dependencies": ["requests>=2.28.0"]
+  },
+  "config": {
+    "env": {
+      "QUARK_COOKIE": {
+        "description": "夸克网盘 Cookie（必填）",
+        "required": true,
+        "secret": true
+      },
+      "QUARK_CONFIG": {
+        "description": "配置文件路径",
+        "required": false,
+        "default": "~/.quark-cli/config.json"
+      },
+      "QUARK_DEBUG": {
+        "description": "启用调试日志",
+        "required": false,
+        "default": ""
+      },
+      "PANSOU_BASE_URL": {
+        "description": "网盘搜索引擎地址",
+        "required": false,
+        "default": "https://www.pansou.com"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "quark_sign",
+      "description": "执行夸克网盘每日签到，领取免费空间奖励",
+      "parameters": {},
+      "returns": "签到结果：奖励空间大小和连签进度"
+    },
+    {
+      "name": "quark_account_info",
+      "description": "获取夸克网盘账号信息，包含昵称、会员类型、空间使用情况",
+      "parameters": {},
+      "returns": "账号信息对象"
+    },
+    {
+      "name": "quark_share_check",
+      "description": "检查夸克网盘分享链接是否有效，返回链接状态和文件数量",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "夸克网盘分享链接，如 https://pan.quark.cn/s/xxxxx",
+          "required": true
+        }
+      },
+      "returns": "链接有效性、文件数量、总大小"
+    },
+    {
+      "name": "quark_share_list",
+      "description": "列出夸克网盘分享链接中的所有文件和文件夹",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "夸克网盘分享链接",
+          "required": true
+        }
+      },
+      "returns": "文件列表，包含文件名、大小、类型"
+    },
+    {
+      "name": "quark_share_save",
+      "description": "将分享链接中的文件转存到自己的网盘指定目录",
+      "parameters": {
+        "url": {
+          "type": "string",
+          "description": "夸克网盘分享链接",
+          "required": true
+        },
+        "savepath": {
+          "type": "string",
+          "description": "保存路径，如 /我的资源/电影",
+          "required": true
+        },
+        "pattern": {
+          "type": "string",
+          "description": "正则过滤文件名，默认 .* 匹配全部",
+          "required": false,
+          "default": ".*"
+        },
+        "replace": {
+          "type": "string",
+          "description": "正则替换文件名",
+          "required": false,
+          "default": ""
+        }
+      },
+      "returns": "转存结果，包含成功/失败文件数量"
+    },
+    {
+      "name": "quark_drive_ls",
+      "description": "列出网盘目录内容，显示文件名、大小、FID、修改时间",
+      "parameters": {
+        "path": {
+          "type": "string",
+          "description": "目录路径，默认 /",
+          "required": false,
+          "default": "/"
+        }
+      },
+      "returns": "目录文件列表"
+    },
+    {
+      "name": "quark_drive_search",
+      "description": "在网盘中搜索文件",
+      "parameters": {
+        "keyword": {
+          "type": "string",
+          "description": "搜索关键词",
+          "required": true
+        },
+        "path": {
+          "type": "string",
+          "description": "搜索范围路径",
+          "required": false,
+          "default": "/"
+        }
+      },
+      "returns": "匹配的文件列表"
+    },
+    {
+      "name": "quark_resource_search",
+      "description": "通过网盘搜索引擎（如 pansou）搜索夸克网盘资源，返回分享链接列表",
+      "parameters": {
+        "keyword": {
+          "type": "string",
+          "description": "搜索关键词，如电影名、剧集名",
+          "required": true
+        },
+        "source": {
+          "type": "string",
+          "description": "搜索源：pansou / funletu",
+          "required": false,
+          "default": "pansou"
+        }
+      },
+      "returns": "搜索结果列表，包含标题和分享链接"
+    },
+    {
+      "name": "quark_task_run",
+      "description": "执行全部自动转存任务",
+      "parameters": {},
+      "returns": "任务执行结果汇总"
+    },
+    {
+      "name": "quark_task_list",
+      "description": "查看当前配置的所有自动转存任务",
+      "parameters": {},
+      "returns": "任务列表"
+    }
+  ],
+  "triggers": [
+    {
+      "type": "keyword",
+      "patterns": ["夸克签到", "quark sign", "签到领空间"],
+      "tool": "quark_sign"
+    },
+    {
+      "type": "keyword",
+      "patterns": ["夸克账号", "quark account", "网盘信息"],
+      "tool": "quark_account_info"
+    },
+    {
+      "type": "regex",
+      "pattern": "https?://pan\\.quark\\.cn/s/\\w+",
+      "tool": "quark_share_check"
+    },
+    {
+      "type": "keyword",
+      "patterns": ["转存", "保存到网盘", "save share"],
+      "tool": "quark_share_save"
+    },
+    {
+      "type": "keyword",
+      "patterns": ["搜索资源", "找资源", "搜片", "search resource"],
+      "tool": "quark_resource_search"
+    },
+    {
+      "type": "keyword",
+      "patterns": ["执行任务", "运行转存", "开始追更", "run task"],
+      "tool": "quark_task_run"
+    }
+  ]
+}
