@@ -12,6 +12,8 @@
 | **网盘操作** | 列目录/创建目录/重命名/删除/搜索/下载 | `quark-cli drive` |
 | **资源搜索** | 通过网盘搜索引擎搜索资源 | `quark-cli search` |
 | **任务管理** | 自动转存任务的增删改查/批量执行 | `quark-cli task` |
+| **影视中心** | fnOS/Emby/Jellyfin 媒体库管理 | `quark-cli media` |
+| **影视发现** | TMDB 元数据查询/高分推荐/路径建议 | `quark-cli media meta/discover` |
 
 ## 安装
 
@@ -50,24 +52,13 @@ deactivate
 python -m quark_cli.cli --help
 
 # 启用 DEBUG 模式（显示完整请求日志）
-export QUARK_DEBUG=1
-quark-cli account info
+quark-cli --debug account info
 
 # 使用自定义配置文件调试（不影响主配置）
 quark-cli -c /tmp/test_config.json config show
 
-# 使用 pytest 运行测试（如有）
-pytest tests/ -v
-
 # 使用 pdb 断点调试
 python -m pdb -m quark_cli.cli share check "https://pan.quark.cn/s/xxxxx"
-
-# 查看调用栈追踪
-python -c "
-from quark_cli.api import QuarkAPI
-client = QuarkAPI('test_cookie')
-print(client.get_account_info())
-"
 ```
 
 ### 方式三：pipx 全局安装（隔离环境）
@@ -124,9 +115,8 @@ quark-cli share save "https://pan.quark.cn/s/xxxxx" /追更/剧集 --pattern "^(
 
 ```bash
 # 通过 pansou 等搜索引擎搜索资源
-quark-cli search "流浪地球"
-quark-cli search "庆余年" --source pansou
-quark-cli search "庆余年" --source funletu
+quark-cli search query "流浪地球"
+quark-cli search query "庆余年" --source pansou
 
 # 先配置搜索源（可选，有默认值）
 quark-cli config set-search-source mypansou "http://your-pansou-host:3032"
@@ -169,6 +159,212 @@ quark-cli task run-one 1
 quark-cli task remove 1
 ```
 
+### 10. 影视媒体中心
+
+`media` 子命令集成了影视媒体中心管理功能，当前支持 **fnOS 飞牛影视**，架构预留 Emby / Jellyfin 扩展。
+
+#### 10.1 登录 fnOS
+
+```bash
+quark-cli media login --host 192.168.1.100 --port 5666 -u admin -p your_password
+
+# 支持 URL 格式的 host
+quark-cli media login --host http://mynas.local:5666 -u admin
+```
+
+#### 10.2 检查连接状态
+
+```bash
+quark-cli media status
+```
+
+#### 10.3 媒体库管理
+
+```bash
+# 列出所有媒体库
+quark-cli media lib list
+
+# 查看某个媒体库的影片
+quark-cli media lib show "电影"
+quark-cli media lib show "电影" --page 2 --size 50
+```
+
+#### 10.4 搜索影片
+
+```bash
+quark-cli media search "流浪地球"
+quark-cli media search "甄嬛" --page 1 --size 10
+```
+
+#### 10.5 影片详情
+
+```bash
+# 通过 GUID 查看
+quark-cli media info 04d6155c8eb64df0bdd39623d006fb57
+
+# 通过名称查看（自动搜索匹配）
+quark-cli media info "流浪地球"
+
+# 显示季列表和演职人员
+quark-cli media info "甄嬛传" --seasons --cast
+```
+
+#### 10.6 下载海报
+
+```bash
+quark-cli media poster "流浪地球" -o ./posters
+```
+
+#### 10.7 导出影片列表
+
+```bash
+# 导出全部影片为 JSON
+quark-cli media export -o my_library.json
+
+# 导出指定媒体库为 CSV
+quark-cli media export -o movies.csv -f csv -l "电影"
+```
+
+#### 10.8 继续观看
+
+```bash
+quark-cli media playing
+```
+
+#### 10.9 媒体配置管理
+
+```bash
+# 查看当前配置（token 脱敏）
+quark-cli media config --show
+
+# 切换 Provider（未来支持 emby / jellyfin）
+quark-cli media config --provider fnos
+
+# 修改服务器配置
+quark-cli media config --host 192.168.1.200 --port 5666
+```
+
+#### 10.10 环境变量覆盖
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `FNOS_HOST` | fnOS 服务器地址 | `192.168.1.100` |
+| `FNOS_PORT` | fnOS 端口 | `5666` |
+| `FNOS_TOKEN` | fnOS 认证 Token | `eyJ...` |
+| `FNOS_SSL` | 启用 HTTPS | `true` |
+
+### 11. 影视发现 (TMDB)
+
+`media meta` 和 `media discover` 基于 TMDB (The Movie Database) API，提供影视元数据查询和高分推荐功能。
+
+#### 11.1 配置 TMDB API Key
+
+使用前需先配置 TMDB API Key（免费申请：https://www.themoviedb.org/settings/api）：
+
+```bash
+quark-cli media config --tmdb-key "your_tmdb_api_key_v3"
+
+# 可选: 修改语言（默认 zh-CN）
+quark-cli media config --tmdb-lang en-US
+```
+
+#### 11.2 查询影视元数据 (meta)
+
+通过关键词搜索、TMDB ID 或 IMDb ID 获取完整元数据，同时生成搜索关键词建议和保存路径建议：
+
+```bash
+# 按名称搜索
+quark-cli media meta "流浪地球2"
+quark-cli media meta "Breaking Bad" -t tv
+
+# 按 TMDB ID 直接获取
+quark-cli media meta --tmdb 634649
+
+# 按 IMDb ID 查找
+quark-cli media meta --imdb tt12093860
+
+# 指定年份过滤
+quark-cli media meta "蜘蛛侠" -y 2021
+
+# 自定义保存路径基准
+quark-cli media meta "流浪地球2" --base-path /我的NAS/媒体
+
+# JSON 输出
+quark-cli --json media meta "流浪地球2"
+```
+
+输出内容包括：
+- 基本信息：标题、年份、评分、类型、片长、状态
+- 主创信息：导演、主演
+- 剧情简介
+- **搜索关键词建议**：中文名、英文名及其年份组合
+- **保存路径建议**：按类型分类、简洁、英文命名三种风格
+- 海报和背景图 URL
+
+#### 11.3 高分影视推荐 (discover)
+
+```bash
+# 高分电影 (默认)
+quark-cli media discover
+
+# 热门电影
+quark-cli media discover --list popular
+
+# 本周趋势
+quark-cli media discover --list trending --window week
+
+# 高分剧集
+quark-cli media discover -t tv --list top_rated
+
+# 高级筛选: 8分以上的科幻动作片
+quark-cli media discover --list discover --min-rating 8.0 --genre "科幻,动作"
+
+# 筛选指定年份和地区
+quark-cli media discover --list discover -y 2025 --country CN
+
+# 翻页
+quark-cli media discover --list top_rated -p 2
+
+# JSON 输出
+quark-cli --json media discover --list popular -t movie
+```
+
+支持的列表类型：
+
+| 类型 | 说明 | 参数 |
+|------|------|------|
+| `top_rated` | 高分排行（默认） | `-p` 页码 |
+| `popular` | 热门排行 | `-p` 页码 |
+| `trending` | 趋势 | `--window day/week` |
+| `discover` | 高级筛选 | `--min-rating` `--genre` `-y` `--country` `--sort-by` |
+
+支持的筛选参数（仅 `discover` 模式）：
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| `--min-rating` | 最低评分 | `8.0` |
+| `--genre` | 类型（中文或 ID） | `动作,科幻` 或 `28,878` |
+| `-y/--year` | 年份 | `2025` |
+| `--country` | 国家/地区代码 | `CN`, `US`, `JP` |
+| `--sort-by` | 排序方式 | `vote_average.desc`, `popularity.desc` |
+| `--min-votes` | 最低票数（默认 50） | `100` |
+
+#### 11.4 典型工作流
+
+```bash
+# 1. 发现高分电影
+quark-cli media discover --list top_rated
+
+# 2. 查看某部电影的详细元数据和搜索关键词
+quark-cli media meta --tmdb 278
+
+# 3. 用建议的关键词搜索网盘资源
+quark-cli search query "肖申克的救赎"
+
+# 4. 转存到建议的路径
+quark-cli share save "https://pan.quark.cn/s/xxxxx" "/媒体/电影/剧情/肖申克的救赎 (1994)"
+```
+
 ## 配置文件
 
 默认位置：`~/.quark-cli/config.json`
@@ -185,28 +381,50 @@ quark-cli -c /path/to/config.json account info
 {
   "cookie": ["your_cookie_here"],
   "search_sources": {
-    "pansou": "https://www.pansou.com",
-    "funletu": "https://pan.funletu.com"
+    "pansou": "https://www.pansou.com"
   },
   "push_config": {},
   "magic_regex": {
-    "$TV": {
-      "pattern": "...",
-      "replace": "..."
-    }
+    "$TV": { "pattern": "...", "replace": "..." }
   },
-  "tasklist": [
-    {
-      "taskname": "任务名",
-      "shareurl": "https://pan.quark.cn/s/xxxxx",
-      "savepath": "/保存路径",
-      "pattern": ".*",
-      "replace": "",
-      "enddate": "2026-12-31",
-      "runweek": [1, 3, 5]
+  "tasklist": [],
+  "media": {
+    "provider": "fnos",
+    "fnos": {
+      "host": "192.168.1.100",
+      "port": 5666,
+      "token": "...",
+      "ssl": false,
+      "api_key": "16CCEB3D-AB42-077D-36A1-F355324E4237",
+      "timeout": 30
+    },
+    "discovery": {
+      "source": "tmdb",
+      "tmdb_api_key": "your_tmdb_v3_api_key",
+      "language": "zh-CN",
+      "region": "CN"
     }
-  ]
+  }
 }
+```
+
+## Debug 模式
+
+全局 `--debug` 开关会打印所有 API 请求/响应详情到 stderr，同时适用于夸克 API 和影视中心 API：
+
+```bash
+quark-cli --debug media status
+quark-cli --debug share check "https://pan.quark.cn/s/xxxxx"
+```
+
+## JSON 输出模式
+
+全局 `--json` 开关让所有命令以 JSON 格式输出，便于脚本集成：
+
+```bash
+quark-cli --json media meta "流浪地球2"
+quark-cli --json media discover --list popular
+quark-cli --json account info
 ```
 
 ## 环境变量
@@ -216,6 +434,10 @@ quark-cli -c /path/to/config.json account info
 | `QUARK_DEBUG` | 启用调试日志 | 未设置 |
 | `QUARK_CONFIG` | 配置文件路径 | `~/.quark-cli/config.json` |
 | `QUARK_COOKIE` | Cookie（优先于配置文件） | 未设置 |
+| `FNOS_HOST` | fnOS 服务器地址 | 未设置 |
+| `FNOS_PORT` | fnOS 端口 | `5666` |
+| `FNOS_TOKEN` | fnOS Token | 未设置 |
+| `FNOS_SSL` | fnOS HTTPS | `false` |
 
 ## Cookie 获取方法
 
@@ -235,6 +457,21 @@ quark-cli -c /path/to/config.json account info
 | `\.mp4$` | | 只转存 .mp4 文件 |
 | `^【XX】(.*)\.mp4` | `\1.mp4` | 去掉前缀广告 |
 | `^(\d+)\.mp4` | `S02E\1.mp4` | 01.mp4 → S02E01.mp4 |
+
+## 架构扩展指南
+
+### 添加新的 Media Provider
+
+1. 创建 `quark_cli/media/<provider_name>/` 目录
+2. 实现 `MediaProvider` 抽象接口（见 `quark_cli/media/base.py`）
+3. 在 `quark_cli/media/registry.py` 注册 Provider
+4. 在配置 `media` 段添加对应配置字段
+
+### 添加新的 Discovery 数据源
+
+1. 创建 `quark_cli/media/discovery/<source_name>.py`
+2. 实现 `DiscoverySource` 抽象接口（见 `quark_cli/media/discovery/base.py`）
+3. 在 `media_cmd.py` 中添加对应数据源创建逻辑
 
 ## 开源协议
 

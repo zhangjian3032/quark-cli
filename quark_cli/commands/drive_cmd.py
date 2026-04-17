@@ -4,6 +4,7 @@ drive 子命令 - 网盘文件操作（ls/mkdir/rename/download/delete/search）
 
 import re
 from quark_cli import display
+from quark_cli.display import is_json_mode, json_out
 from quark_cli.api import QuarkAPI
 from quark_cli.commands.helpers import get_client
 
@@ -32,31 +33,44 @@ def _ls(args):
     client = get_client(args)
     path = args.path
 
-    # 获取目录 fid
     if path == "/":
         pdir_fid = "0"
     else:
-        path_normalized = re.sub(r"/{2,}", "/", f"/{path}")
+        path_normalized = re.sub(r"/{2,}", "/", "/{}".format(path))
         fids = client.get_fids([path_normalized])
         if not fids:
-            display.error(f"目录不存在: {path}")
+            display.error("目录不存在: {}".format(path))
             return
         pdir_fid = fids[0]["fid"]
 
     resp = client.ls_dir(pdir_fid, fetch_full_path=1)
     if resp.get("code") != 0:
-        display.error(f"列出目录失败: {resp.get('message')}")
+        display.error("列出目录失败: {}".format(resp.get("message")))
         return
 
     file_list = resp["data"]["list"]
-    display.header(f"📂 {path}  ({len(file_list)} 项)")
+
+    if is_json_mode():
+        items = []
+        for f in file_list:
+            items.append({
+                "file_name": f.get("file_name", ""),
+                "fid": f.get("fid", ""),
+                "size": f.get("size", 0),
+                "dir": bool(f.get("dir") or f.get("file_type") == 0),
+                "updated_at": f.get("updated_at"),
+            })
+        json_out({"path": path, "count": len(file_list), "files": items})
+        return
+
+    display.header("\U0001f4c2 {}  ({} 项)".format(path, len(file_list)))
 
     if not file_list:
         display.info("空目录")
         return
 
     cols = ["", "文件名", "大小", "FID", "修改时间"]
-    widths = [4, 36, 12, 36, 18]
+    widths = [4, 38, 12, 36, 18]
     display.table_header(cols, widths)
 
     for f in file_list:
@@ -73,23 +87,20 @@ def _ls(args):
             [None, name_color, display.Color.CYAN, display.Color.DIM, display.Color.DIM],
         )
 
-    # 统计
     total_files = sum(1 for f in file_list if not (f.get("dir") or f.get("file_type") == 0))
     total_dirs = sum(1 for f in file_list if f.get("dir") or f.get("file_type") == 0)
     total_size = sum(
         f.get("size", 0) for f in file_list if not (f.get("dir") or f.get("file_type") == 0)
     )
     print()
-    display.info(
-        f"{total_dirs} 个文件夹, {total_files} 个文件, "
-        f"总计 {QuarkAPI.format_bytes(total_size)}"
-    )
+    display.info("{} 个文件夹, {} 个文件, 总计 {}".format(
+        total_dirs, total_files, QuarkAPI.format_bytes(total_size)))
 
 
 def _mkdir(args):
     """创建目录"""
     client = get_client(args)
-    path = re.sub(r"/{2,}", "/", f"/{args.path}")
+    path = re.sub(r"/{2,}", "/", "/{}".format(args.path))
 
     info = client.init()
     if not info:
@@ -98,10 +109,13 @@ def _mkdir(args):
 
     resp = client.mkdir(path)
     if resp.get("code") == 0:
-        display.success(f"目录已创建: {path}")
-        display.kvline("FID", resp["data"]["fid"])
+        if is_json_mode():
+            json_out({"path": path, "fid": resp["data"]["fid"]})
+        else:
+            display.success("目录已创建: {}".format(path))
+            display.kvline("FID", resp["data"]["fid"])
     else:
-        display.error(f"创建失败: {resp.get('message')}")
+        display.error("创建失败: {}".format(resp.get("message")))
 
 
 def _rename(args):
@@ -109,9 +123,12 @@ def _rename(args):
     client = get_client(args)
     resp = client.rename(args.fid, args.name)
     if resp.get("code") == 0:
-        display.success(f"重命名成功 → {args.name}")
+        if is_json_mode():
+            json_out({"fid": args.fid, "new_name": args.name})
+        else:
+            display.success("重命名成功 \u2192 {}".format(args.name))
     else:
-        display.error(f"重命名失败: {resp.get('message')}")
+        display.error("重命名失败: {}".format(resp.get("message")))
 
 
 def _download(args):
@@ -121,7 +138,19 @@ def _download(args):
 
     resp, cookie = client.download(fids)
     if resp.get("code") != 0:
-        display.error(f"获取下载链接失败: {resp.get('message')}")
+        display.error("获取下载链接失败: {}".format(resp.get("message")))
+        return
+
+    if is_json_mode():
+        items = []
+        for item in resp.get("data", []):
+            items.append({
+                "file_name": item.get("file_name", ""),
+                "size": item.get("size", 0),
+                "download_url": item.get("download_url", ""),
+                "cookie": cookie or "",
+            })
+        json_out(items)
         return
 
     display.header("下载链接")
@@ -142,18 +171,22 @@ def _delete(args):
     client = get_client(args)
     fids = args.fid
 
-    display.warning(f"即将删除 {len(fids)} 个文件/文件夹")
-    confirm = input("  确认删除? (y/N): ").strip().lower()
-    if confirm != "y":
-        display.info("操作已取消")
-        return
+    if not is_json_mode():
+        display.warning("即将删除 {} 个文件/文件夹".format(len(fids)))
+        confirm = input("  确认删除? (y/N): ").strip().lower()
+        if confirm != "y":
+            display.info("操作已取消")
+            return
 
     resp = client.delete(fids)
     if resp.get("code") == 0:
         task_id = resp["data"]["task_id"]
         task_resp = client.query_task(task_id)
         if task_resp.get("code") == 0:
-            display.success(f"已删除 {len(fids)} 个文件/文件夹")
+            if is_json_mode():
+                json_out({"deleted": len(fids), "fids": fids})
+            else:
+                display.success("已删除 {} 个文件/文件夹".format(len(fids)))
 
             if getattr(args, "permanent", False):
                 recycle = client.recycle_list()
@@ -162,38 +195,33 @@ def _delete(args):
                 ]
                 if records:
                     client.recycle_remove(records)
-                    display.success("已从回收站彻底删除")
+                    if not is_json_mode():
+                        display.success("已从回收站彻底删除")
         else:
-            display.error(f"删除任务失败: {task_resp.get('message')}")
+            display.error("删除任务失败: {}".format(task_resp.get("message")))
     else:
-        display.error(f"删除失败: {resp.get('message')}")
+        display.error("删除失败: {}".format(resp.get("message")))
 
 
 def _search(args):
-    """搜索网盘文件（通过 ls 递归实现简单搜索）"""
+    """搜索网盘文件"""
     client = get_client(args)
     keyword = args.keyword
     search_path = getattr(args, "path", "/")
 
-    # 获取根目录 fid
     if search_path == "/":
         pdir_fid = "0"
     else:
-        path_normalized = re.sub(r"/{2,}", "/", f"/{search_path}")
+        path_normalized = re.sub(r"/{2,}", "/", "/{}".format(search_path))
         fids = client.get_fids([path_normalized])
         if not fids:
-            display.error(f"目录不存在: {search_path}")
+            display.error("目录不存在: {}".format(search_path))
             return
         pdir_fid = fids[0]["fid"]
 
-    display.header(f"搜索: {keyword}")
-    display.kvline("搜索范围", search_path)
-    print()
-
-    # 列出目录并过滤
     resp = client.ls_dir(pdir_fid, fetch_full_path=1)
     if resp.get("code") != 0:
-        display.error(f"搜索失败: {resp.get('message')}")
+        display.error("搜索失败: {}".format(resp.get("message")))
         return
 
     file_list = resp["data"]["list"]
@@ -202,12 +230,28 @@ def _search(args):
         if keyword.lower() in f.get("file_name", "").lower()
     ]
 
+    if is_json_mode():
+        items = []
+        for f in results:
+            items.append({
+                "file_name": f.get("file_name", ""),
+                "fid": f.get("fid", ""),
+                "size": f.get("size", 0),
+                "dir": bool(f.get("dir") or f.get("file_type") == 0),
+            })
+        json_out({"keyword": keyword, "path": search_path, "count": len(items), "files": items})
+        return
+
+    display.header("搜索: {}".format(keyword))
+    display.kvline("搜索范围", search_path)
+    print()
+
     if not results:
         display.warning("未找到匹配文件")
         return
 
     cols = ["", "文件名", "大小", "FID"]
-    widths = [4, 40, 12, 38]
+    widths = [4, 42, 12, 38]
     display.table_header(cols, widths)
 
     for f in results:
@@ -223,4 +267,4 @@ def _search(args):
         )
 
     print()
-    display.info(f"找到 {len(results)} 个匹配结果")
+    display.info("找到 {} 个匹配结果".format(len(results)))

@@ -1,8 +1,8 @@
 {
   "schema_version": "v1",
   "name": "quark-drive",
-  "version": "1.0.0",
-  "description": "夸克网盘 CLI Agent - 签到/资源搜索/分享检查/转存/文件管理",
+  "version": "2.1.0",
+  "description": "夸克网盘 CLI Agent - 签到/资源搜索/分享检查/转存/文件管理/影视媒体中心",
   "author": "quark-cli",
   "license": "AGPL-3.0",
   "homepage": "https://github.com/Cp0204/quark-auto-save",
@@ -10,7 +10,9 @@
     "type": "python",
     "python_version": ">=3.8",
     "entry_point": "agent/main.py",
-    "dependencies": ["requests>=2.28.0"]
+    "dependencies": [
+      "requests>=2.28.0"
+    ]
   },
   "config": {
     "env": {
@@ -33,6 +35,27 @@
         "description": "网盘搜索引擎地址",
         "required": false,
         "default": "https://www.pansou.com"
+      },
+      "FNOS_HOST": {
+        "description": "fnOS 飞牛影视 NAS 地址",
+        "required": false,
+        "default": ""
+      },
+      "FNOS_PORT": {
+        "description": "fnOS 端口",
+        "required": false,
+        "default": "5666"
+      },
+      "FNOS_TOKEN": {
+        "description": "fnOS 认证 Token",
+        "required": false,
+        "secret": true,
+        "default": ""
+      },
+      "FNOS_SSL": {
+        "description": "fnOS 是否启用 HTTPS",
+        "required": false,
+        "default": "false"
       }
     }
   },
@@ -144,7 +167,7 @@
         },
         "source": {
           "type": "string",
-          "description": "搜索源：pansou / funletu",
+          "description": "搜索源：pansou",
           "required": false,
           "default": "pansou"
         }
@@ -162,17 +185,157 @@
       "description": "查看当前配置的所有自动转存任务",
       "parameters": {},
       "returns": "任务列表"
+    },
+    {
+      "name": "media_status",
+      "description": "检查影视媒体中心连接状态，返回 Provider/用户/设备信息",
+      "parameters": {},
+      "returns": "连接状态、Provider 名称、用户名、设备名"
+    },
+    {
+      "name": "media_lib_list",
+      "description": "列出影视媒体中心所有媒体库",
+      "parameters": {},
+      "returns": "媒体库列表，包含名称、类型、影片数"
+    },
+    {
+      "name": "media_search",
+      "description": "在影视媒体中心搜索影片",
+      "parameters": {
+        "keyword": {
+          "type": "string",
+          "description": "搜索关键词，如电影/剧集名",
+          "required": true
+        }
+      },
+      "returns": "影片列表，包含标题、年份、评分、GUID"
+    },
+    {
+      "name": "media_info",
+      "description": "获取影片详细信息，包含简介、评分、季列表、演职人员等",
+      "parameters": {
+        "guid": {
+          "type": "string",
+          "description": "影片 GUID 或名称",
+          "required": true
+        },
+        "seasons": {
+          "type": "boolean",
+          "description": "是否获取季列表",
+          "required": false,
+          "default": false
+        },
+        "cast": {
+          "type": "boolean",
+          "description": "是否获取演职人员",
+          "required": false,
+          "default": false
+        }
+      },
+      "returns": "影片详情对象"
+    },
+    {
+      "name": "media_meta",
+      "description": "查询 TMDB 影视元数据，获取评分、主创、简介等信息，同时生成搜索关键词建议和保存路径建议",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "影视作品名称"
+          },
+          "tmdb_id": {
+            "type": "string",
+            "description": "TMDB ID (可选)"
+          },
+          "imdb_id": {
+            "type": "string",
+            "description": "IMDb ID (可选)"
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ],
+            "default": "movie",
+            "description": "类型"
+          },
+          "year": {
+            "type": "integer",
+            "description": "年份过滤 (可选)"
+          }
+        }
+      }
+    },
+    {
+      "name": "media_discover",
+      "description": "高分影视推荐，支持热门/高分/趋势/高级筛选",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "list_type": {
+            "type": "string",
+            "enum": [
+              "popular",
+              "top_rated",
+              "trending",
+              "discover"
+            ],
+            "default": "top_rated",
+            "description": "列表类型"
+          },
+          "media_type": {
+            "type": "string",
+            "enum": [
+              "movie",
+              "tv"
+            ],
+            "default": "movie",
+            "description": "类型"
+          },
+          "page": {
+            "type": "integer",
+            "default": 1,
+            "description": "页码"
+          },
+          "min_rating": {
+            "type": "number",
+            "description": "最低评分"
+          },
+          "genre": {
+            "type": "string",
+            "description": "类型过滤 (逗号分隔)"
+          },
+          "year": {
+            "type": "integer",
+            "description": "年份"
+          },
+          "country": {
+            "type": "string",
+            "description": "国家代码"
+          }
+        }
+      }
     }
   ],
   "triggers": [
     {
       "type": "keyword",
-      "patterns": ["夸克签到", "quark sign", "签到领空间"],
+      "patterns": [
+        "夸克签到",
+        "quark sign",
+        "签到领空间"
+      ],
       "tool": "quark_sign"
     },
     {
       "type": "keyword",
-      "patterns": ["夸克账号", "quark account", "网盘信息"],
+      "patterns": [
+        "夸克账号",
+        "quark account",
+        "网盘信息"
+      ],
       "tool": "quark_account_info"
     },
     {
@@ -182,18 +345,61 @@
     },
     {
       "type": "keyword",
-      "patterns": ["转存", "保存到网盘", "save share"],
+      "patterns": [
+        "转存",
+        "保存到网盘",
+        "save share"
+      ],
       "tool": "quark_share_save"
     },
     {
       "type": "keyword",
-      "patterns": ["搜索资源", "找资源", "搜片", "search resource"],
+      "patterns": [
+        "搜索资源",
+        "找资源",
+        "搜片",
+        "search resource"
+      ],
       "tool": "quark_resource_search"
     },
     {
       "type": "keyword",
-      "patterns": ["执行任务", "运行转存", "开始追更", "run task"],
+      "patterns": [
+        "执行任务",
+        "运行转存",
+        "开始追更",
+        "run task"
+      ],
       "tool": "quark_task_run"
+    },
+    {
+      "type": "keyword",
+      "patterns": [
+        "媒体库",
+        "影视库",
+        "media library",
+        "影片列表"
+      ],
+      "tool": "media_lib_list"
+    },
+    {
+      "type": "keyword",
+      "patterns": [
+        "搜索影片",
+        "搜电影",
+        "搜剧",
+        "media search"
+      ],
+      "tool": "media_search"
+    },
+    {
+      "type": "keyword",
+      "patterns": [
+        "影片详情",
+        "电影信息",
+        "media info"
+      ],
+      "tool": "media_info"
     }
   ]
 }

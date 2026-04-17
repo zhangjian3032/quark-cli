@@ -6,6 +6,7 @@ import re
 import json
 from datetime import datetime
 from quark_cli import display
+from quark_cli.display import is_json_mode, json_out
 from quark_cli.api import QuarkAPI
 from quark_cli.commands.helpers import get_client, get_config
 
@@ -33,13 +34,20 @@ def _list(args):
     tasks = cfg.get_tasklist()
 
     if not tasks:
-        display.info("暂无任务，使用 quark-cli task add 添加")
+        if is_json_mode():
+            json_out([])
+        else:
+            display.info("暂无任务，使用 quark-cli task add 添加")
         return
 
-    display.header(f"任务列表 ({len(tasks)} 个)")
+    if is_json_mode():
+        json_out(tasks)
+        return
+
+    display.header("任务列表 ({} 个)".format(len(tasks)))
 
     cols = ["#", "任务名称", "保存路径", "结束日期", "运行星期"]
-    widths = [4, 30, 26, 14, 16]
+    widths = [4, 32, 28, 14, 16]
     display.table_header(cols, widths)
 
     for i, task in enumerate(tasks):
@@ -49,7 +57,6 @@ def _list(args):
         runweek = task.get("runweek", [])
         week_str = ",".join(str(d) for d in runweek) if runweek else "每天"
 
-        # 检查是否过期
         expired = False
         if task.get("enddate"):
             try:
@@ -66,12 +73,11 @@ def _list(args):
             [display.Color.CYAN, name_color, display.Color.DIM, None, None],
         )
         if expired:
-            print(f"      {display.colorize('(已过期)', display.Color.RED)}")
+            print("      {}".format(display.colorize("(已过期)", display.Color.RED)))
 
-    # 详细信息
     print()
     for i, task in enumerate(tasks):
-        display.subheader(f"#{i + 1} {task.get('taskname', '未命名')}")
+        display.subheader("#{} {}".format(i + 1, task.get("taskname", "未命名")))
         display.kvline("分享链接", task.get("shareurl", "N/A"))
         display.kvline("保存路径", task.get("savepath", "N/A"))
         if task.get("pattern"):
@@ -103,11 +109,14 @@ def _add(args):
     cfg.load()
     cfg.add_task(task)
 
-    display.success(f"任务已添加: {args.name}")
+    if is_json_mode():
+        json_out(task)
+        return
+
+    display.success("任务已添加: {}".format(args.name))
     display.kvline("分享链接", args.url)
     display.kvline("保存路径", args.savepath)
 
-    # 可选：验证链接
     try:
         cookies = cfg.get_cookies()
         if cookies:
@@ -116,9 +125,9 @@ def _add(args):
             if pwd_id:
                 resp = client.get_stoken(pwd_id, passcode)
                 if resp.get("status") == 200:
-                    display.success("分享链接验证有效 ✔")
+                    display.success("分享链接验证有效 \u2714")
                 else:
-                    display.warning(f"分享链接可能无效: {resp.get('message')}")
+                    display.warning("分享链接可能无效: {}".format(resp.get("message")))
     except Exception:
         pass
 
@@ -131,11 +140,17 @@ def _remove(args):
     idx = args.index - 1
 
     if idx < 0 or idx >= len(tasks):
-        display.error(f"无效的任务序号: {args.index}（共 {len(tasks)} 个任务）")
+        display.error("无效的任务序号: {}（共 {} 个任务）".format(args.index, len(tasks)))
         return
 
     task = tasks[idx]
-    display.warning(f"即将移除任务: {task.get('taskname', '未命名')}")
+
+    if is_json_mode():
+        cfg.remove_task(idx)
+        json_out({"removed": task.get("taskname", ""), "index": args.index})
+        return
+
+    display.warning("即将移除任务: {}".format(task.get("taskname", "未命名")))
     confirm = input("  确认? (y/N): ").strip().lower()
     if confirm == "y":
         cfg.remove_task(idx)
@@ -160,13 +175,13 @@ def _run(args):
         display.error("账号验证失败")
         return
 
-    display.header(f"执行全部任务 ({len(tasks)} 个)")
-    display.kvline("账号", client.nickname)
-    display.kvline("时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    if not is_json_mode():
+        display.header("执行全部任务 ({} 个)".format(len(tasks)))
+        display.kvline("账号", client.nickname)
+        display.kvline("时间", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-    # 预先获取目标目录 fid
     dir_paths = [
-        re.sub(r"/{2,}", "/", f"/{t['savepath']}")
+        re.sub(r"/{2,}", "/", "/{}".format(t["savepath"]))
         for t in tasks
         if _is_active(t)
     ]
@@ -178,37 +193,47 @@ def _run(args):
     success_count = 0
     skip_count = 0
     fail_count = 0
+    results = []
 
     for i, task in enumerate(tasks):
-        print()
-        display.subheader(f"#{i + 1} {task.get('taskname', '未命名')}")
-        display.kvline("分享链接", task.get("shareurl", "N/A"))
-        display.kvline("保存路径", task.get("savepath", "N/A"))
+        if not is_json_mode():
+            print()
+            display.subheader("#{} {}".format(i + 1, task.get("taskname", "未命名")))
+            display.kvline("分享链接", task.get("shareurl", "N/A"))
+            display.kvline("保存路径", task.get("savepath", "N/A"))
 
         if not _is_active(task):
-            display.info("任务不在运行周期内，跳过")
+            if not is_json_mode():
+                display.info("任务不在运行周期内，跳过")
             skip_count += 1
+            results.append({"task": task.get("taskname"), "status": "skipped", "reason": "not_active"})
             continue
 
         if task.get("shareurl_ban"):
-            display.warning(f"链接已失效: {task['shareurl_ban']}")
+            if not is_json_mode():
+                display.warning("链接已失效: {}".format(task["shareurl_ban"]))
             skip_count += 1
+            results.append({"task": task.get("taskname"), "status": "skipped", "reason": "banned"})
             continue
 
         result = _execute_single_task(client, task, cfg)
         if result:
             success_count += 1
+            results.append({"task": task.get("taskname"), "status": "success"})
         else:
             fail_count += 1
+            results.append({"task": task.get("taskname"), "status": "failed"})
 
-    # 保存配置（更新失效记录等）
     cfg.save()
 
-    print()
-    display.header("执行完毕")
-    display.kvline("成功", str(success_count))
-    display.kvline("跳过", str(skip_count))
-    display.kvline("失败", str(fail_count))
+    if is_json_mode():
+        json_out({"success": success_count, "skipped": skip_count, "failed": fail_count, "details": results})
+    else:
+        print()
+        display.header("执行完毕")
+        display.kvline("成功", str(success_count))
+        display.kvline("跳过", str(skip_count))
+        display.kvline("失败", str(fail_count))
 
 
 def _run_one(args):
@@ -219,7 +244,7 @@ def _run_one(args):
     idx = args.index - 1
 
     if idx < 0 or idx >= len(tasks):
-        display.error(f"无效的任务序号: {args.index}")
+        display.error("无效的任务序号: {}".format(args.index))
         return
 
     task = tasks[idx]
@@ -229,32 +254,31 @@ def _run_one(args):
         display.error("账号验证失败")
         return
 
-    display.header(f"执行任务: {task.get('taskname')}")
+    if not is_json_mode():
+        display.header("执行任务: {}".format(task.get("taskname")))
     _execute_single_task(client, task, cfg)
     cfg.save()
 
 
-def _execute_single_task(client: QuarkAPI, task: dict, cfg) -> bool:
+def _execute_single_task(client, task, cfg):
     """执行单个转存任务"""
     pwd_id, passcode, pdir_fid, _ = QuarkAPI.extract_share_url(task["shareurl"])
     if not pwd_id:
         display.error("无法解析分享链接")
         return False
 
-    # 验证分享
     resp = client.get_stoken(pwd_id, passcode)
     if resp.get("status") != 200:
         msg = resp.get("message", "未知错误")
-        display.error(f"分享链接无效: {msg}")
+        display.error("分享链接无效: {}".format(msg))
         task["shareurl_ban"] = msg
         return False
 
     stoken = resp["data"]["stoken"]
 
-    # 获取分享文件
     detail = client.get_share_detail(pwd_id, stoken, pdir_fid)
     if detail.get("code") != 0:
-        display.error(f"获取分享文件失败: {detail.get('message')}")
+        display.error("获取分享文件失败: {}".format(detail.get("message")))
         return False
 
     file_list = detail["data"]["list"]
@@ -263,18 +287,15 @@ def _execute_single_task(client: QuarkAPI, task: dict, cfg) -> bool:
         task["shareurl_ban"] = "分享为空"
         return False
 
-    # 仅一个文件夹时自动进入
     if len(file_list) == 1 and file_list[0].get("dir"):
         detail = client.get_share_detail(pwd_id, stoken, file_list[0]["fid"])
         if detail.get("code") == 0:
             file_list = detail["data"]["list"]
 
-    # 正则过滤
     pattern = task.get("pattern", ".*")
     filtered = [f for f in file_list if re.search(pattern, f["file_name"])]
 
-    # 确保目标目录
-    savepath = re.sub(r"/{2,}", "/", f"/{task['savepath']}")
+    savepath = re.sub(r"/{2,}", "/", "/{}".format(task["savepath"]))
     if not client.savepath_fid.get(savepath):
         fids = client.get_fids([savepath])
         if fids:
@@ -283,29 +304,29 @@ def _execute_single_task(client: QuarkAPI, task: dict, cfg) -> bool:
             mkdir_resp = client.mkdir(savepath)
             if mkdir_resp.get("code") == 0:
                 client.savepath_fid[savepath] = mkdir_resp["data"]["fid"]
-                display.info(f"已创建目录: {savepath}")
+                if not is_json_mode():
+                    display.info("已创建目录: {}".format(savepath))
             else:
-                display.error(f"创建目录失败: {mkdir_resp.get('message')}")
+                display.error("创建目录失败: {}".format(mkdir_resp.get("message")))
                 return False
 
     to_pdir_fid = client.savepath_fid[savepath]
 
-    # 获取已有文件
     dir_resp = client.ls_dir(to_pdir_fid)
     existing = []
     if dir_resp.get("code") == 0:
         existing = [f["file_name"] for f in dir_resp["data"]["list"]]
 
-    # 过滤已存在
     to_save = [f for f in filtered if f["file_name"] not in existing]
 
     if not to_save:
-        display.info("没有需要转存的新文件")
+        if not is_json_mode():
+            display.info("没有需要转存的新文件")
         return True
 
-    display.info(f"发现 {len(to_save)} 个新文件")
+    if not is_json_mode():
+        display.info("发现 {} 个新文件".format(len(to_save)))
 
-    # 转存
     saved_fids = []
     for i in range(0, len(to_save), 100):
         batch = to_save[i : i + 100]
@@ -318,9 +339,8 @@ def _execute_single_task(client: QuarkAPI, task: dict, cfg) -> bool:
             if task_resp.get("code") == 0:
                 saved_fids.extend(task_resp["data"]["save_as"]["save_as_top_fids"])
         else:
-            display.error(f"转存失败: {save_resp.get('message')}")
+            display.error("转存失败: {}".format(save_resp.get("message")))
 
-    # 重命名
     replace = task.get("replace", "")
     if replace and saved_fids:
         for idx, f in enumerate(to_save):
@@ -329,15 +349,16 @@ def _execute_single_task(client: QuarkAPI, task: dict, cfg) -> bool:
                 if new_name != f["file_name"]:
                     client.rename(saved_fids[idx], new_name)
 
-    for f in to_save:
-        icon = display.file_icon(f)
-        display.success(f"{icon} {f['file_name']}")
+    if not is_json_mode():
+        for f in to_save:
+            icon = display.file_icon(f)
+            display.success("{} {}".format(icon, f["file_name"]))
+        display.success("转存完成，共 {} 个文件".format(len(saved_fids)))
 
-    display.success(f"转存完成，共 {len(saved_fids)} 个文件")
     return True
 
 
-def _is_active(task: dict) -> bool:
+def _is_active(task):
     """判断任务是否在有效期和运行周期内"""
     if task.get("enddate"):
         try:

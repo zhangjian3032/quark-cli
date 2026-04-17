@@ -13,7 +13,7 @@ from quark_cli import __version__
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="quark-cli",
-        description="夸克网盘命令行工具 - 签到/搜索/转存/文件管理一站式 CLI",
+        description="夸克网盘命令行工具 - 签到/搜索/转存/文件管理/影视中心 一站式 CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
@@ -31,6 +31,13 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli task list                              查看任务列表
   quark-cli task add                               添加转存任务
   quark-cli task run                               执行全部任务
+  quark-cli media login --host <ip> -u <user>      登录影视中心
+  quark-cli media status                           检查影视中心连接
+  quark-cli media lib list                         列出媒体库
+  quark-cli media search "关键词"                  搜索影片
+  quark-cli media info <GUID>                      查看影片详情
+  quark-cli media meta "流浪地球2"                 查询 TMDB 元数据
+  quark-cli media discover --list top_rated        高分影视推荐
 
 调试模式:
   quark-cli --debug search query "关键词"          启用 debug 输出
@@ -41,6 +48,10 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--debug", action="store_true", default=False,
         help="启用 debug 模式，打印所有 API 请求/响应详情到 stderr"
+    )
+    parser.add_argument(
+        "--json", action="store_true", default=False,
+        help="所有命令以 JSON 格式输出结果"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
@@ -157,6 +168,93 @@ def create_parser() -> argparse.ArgumentParser:
     tri = task_sub.add_parser("run-one", help="执行指定任务")
     tri.add_argument("index", type=int, help="任务序号（从 1 开始）")
 
+    # ========== media (影视媒体中心) ==========
+    media_parser = subparsers.add_parser("media", help="影视媒体中心 (fnOS / Emby / Jellyfin / TMDB)")
+    media_sub = media_parser.add_subparsers(dest="media_action")
+
+    # media login
+    ml = media_sub.add_parser("login", help="登录影视中心")
+    ml.add_argument("--host", help="NAS/服务器 地址 (IP/域名)")
+    ml.add_argument("--port", type=int, help="端口")
+    ml.add_argument("-u", "--username", help="用户名")
+    ml.add_argument("-p", "--password", help="密码")
+
+    # media status
+    media_sub.add_parser("status", help="检查连接状态")
+
+    # media config
+    mc = media_sub.add_parser("config", help="查看/修改媒体配置")
+    mc.add_argument("--show", action="store_true", help="显示当前配置")
+    mc.add_argument("--provider", help="设置 Provider (fnos/emby/jellyfin)")
+    mc.add_argument("--host", help="设置服务器地址")
+    mc.add_argument("--port", type=int, help="设置端口")
+    mc.add_argument("--token", help="设置 Token")
+    mc.add_argument("--tmdb-key", help="设置 TMDB API Key")
+    mc.add_argument("--tmdb-lang", help="设置 TMDB 语言 (默认 zh-CN)")
+
+    # media lib
+    lib_parser = media_sub.add_parser("lib", help="媒体库管理")
+    lib_sub = lib_parser.add_subparsers(dest="lib_action")
+
+    lib_sub.add_parser("list", help="列出所有媒体库")
+
+    ls_lib = lib_sub.add_parser("show", help="显示媒体库中的影片")
+    ls_lib.add_argument("lib_name", help="媒体库名称或 GUID")
+    ls_lib.add_argument("-p", "--page", type=int, default=1, help="页码")
+    ls_lib.add_argument("-s", "--size", type=int, default=20, help="每页数量")
+
+    # media search
+    ms = media_sub.add_parser("search", help="搜索影片")
+    ms.add_argument("keyword", help="搜索关键词")
+    ms.add_argument("-p", "--page", type=int, default=1, help="页码")
+    ms.add_argument("-s", "--size", type=int, default=20, help="每页数量")
+
+    # media info
+    mi = media_sub.add_parser("info", help="查看影片详情")
+    mi.add_argument("guid", help="影片 GUID 或名称")
+    mi.add_argument("--seasons", "-S", action="store_true", help="显示季列表")
+    mi.add_argument("--cast", "-C", action="store_true", help="显示演职人员")
+
+    # media poster
+    mp = media_sub.add_parser("poster", help="下载影片海报")
+    mp.add_argument("guid", help="影片 GUID 或名称")
+    mp.add_argument("-o", "--output", default=".", help="输出目录")
+
+    # media export
+    me = media_sub.add_parser("export", help="导出影片列表")
+    me.add_argument("-o", "--output", default="export.json", help="输出文件")
+    me.add_argument("-f", "--format", default="json", choices=["json", "csv"], help="格式")
+    me.add_argument("-l", "--lib", help="媒体库名称 (不指定则导出全部)")
+
+    # media playing
+    media_sub.add_parser("playing", help="查看继续观看列表")
+
+    # media meta  (TMDB 元数据查询)
+    mm = media_sub.add_parser("meta", help="查询影视元数据 (TMDB)")
+    mm.add_argument("query", nargs="?", help="搜索关键词 (如 '流浪地球2')")
+    mm.add_argument("--tmdb", help="直接指定 TMDB ID")
+    mm.add_argument("--imdb", help="直接指定 IMDb ID")
+    mm.add_argument("-t", "--type", default="movie", choices=["movie", "tv"], help="类型 (默认 movie)")
+    mm.add_argument("-y", "--year", type=int, help="年份过滤")
+    mm.add_argument("--base-path", default="/媒体", help="保存路径基准目录 (默认 /媒体)")
+
+    # media discover  (高分影视推荐)
+    md = media_sub.add_parser("discover", help="高分影视推荐 (TMDB)")
+    md.add_argument("--list", dest="list_type", default="top_rated",
+                     choices=["popular", "top_rated", "trending", "discover"],
+                     help="推荐列表类型 (默认 top_rated)")
+    md.add_argument("-t", "--type", default="movie", choices=["movie", "tv"], help="类型 (默认 movie)")
+    md.add_argument("-p", "--page", type=int, default=1, help="页码")
+    md.add_argument("--min-rating", type=float, help="最低评分 (如 8.0)")
+    md.add_argument("--genre", help="类型过滤 (逗号分隔, 如 '动作,科幻' 或 TMDB genre_id)")
+    md.add_argument("-y", "--year", type=int, help="年份")
+    md.add_argument("--country", help="国家/地区代码 (如 CN, US, JP)")
+    md.add_argument("--sort-by", default="vote_average.desc",
+                     help="排序方式 (默认 vote_average.desc)")
+    md.add_argument("--min-votes", type=int, default=50, help="最低票数 (默认 50)")
+    md.add_argument("--window", default="week", choices=["day", "week"],
+                     help="趋势时间窗口 (仅 trending 有效, 默认 week)")
+
     return parser
 
 
@@ -169,6 +267,10 @@ def main():
         from quark_cli import debug as dbg
         dbg.set_debug(True)
         dbg.log("CLI", f"Debug 模式已启用, args={vars(args)}")
+    # 初始化 JSON 模式
+    if getattr(args, "json", False):
+        from quark_cli.display import set_json_mode
+        set_json_mode(True)
 
     if not args.command:
         parser.print_help()
@@ -176,6 +278,7 @@ def main():
 
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
+    from quark_cli.commands import media_cmd
 
     handlers = {
         "config": config_cmd.handle,
@@ -184,6 +287,7 @@ def main():
         "search": search_cmd.handle,
         "drive": drive_cmd.handle,
         "task": task_cmd.handle,
+        "media": media_cmd.handle,
     }
 
     handler = handlers.get(args.command)
