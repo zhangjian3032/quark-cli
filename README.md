@@ -129,7 +129,7 @@ quark-cli search "庆余年" --source pansou
 quark-cli search "庆余年" --source funletu
 
 # 先配置搜索源（可选，有默认值）
-quark-cli config set-search-source "https://www.pansou.com"
+quark-cli config set-search-source mypansou "http://your-pansou-host:3032"
 ```
 
 ### 8. 网盘文件管理

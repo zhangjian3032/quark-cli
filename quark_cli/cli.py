@@ -23,9 +23,11 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli share check <url>                      检查分享链接是否有效
   quark-cli share list <url>                       列出分享链接中的文件
   quark-cli share save <url> /保存路径             转存文件
+  quark-cli search query "关键词"                  搜索网盘资源
+  quark-cli search save "关键词" /保存路径         搜索并转存
   quark-cli drive ls /路径                         列出网盘目录
   quark-cli drive mkdir /新目录                    创建目录
-  quark-cli drive search <关键词>                  搜索文件
+  quark-cli drive search <关键词>                  搜索网盘内文件
   quark-cli task list                              查看任务列表
   quark-cli task add                               添加转存任务
   quark-cli task run                               执行全部任务
@@ -50,6 +52,10 @@ def create_parser() -> argparse.ArgumentParser:
 
     rc = config_sub.add_parser("remove-cookie", help="移除指定 Cookie")
     rc.add_argument("-i", "--index", type=int, default=0, help="账号索引")
+
+    ss = config_sub.add_parser("set-search-source", help="配置自定义搜索源")
+    ss.add_argument("source_name", help="搜索源名称，如 pansou")
+    ss.add_argument("source_url", help="搜索源地址")
 
     # ========== account ==========
     account_parser = subparsers.add_parser("account", help="账号管理")
@@ -77,6 +83,25 @@ def create_parser() -> argparse.ArgumentParser:
     sv.add_argument("--pattern", default=".*", help="正则过滤文件名（默认 .*）")
     sv.add_argument("--replace", default="", help="正则替换文件名")
 
+    # ========== search (资源搜索) ==========
+    search_parser = subparsers.add_parser("search", help="网盘资源搜索（pansou 等）")
+    search_sub = search_parser.add_subparsers(dest="search_action")
+
+    sq = search_sub.add_parser("query", help="搜索网盘资源")
+    sq.add_argument("keyword", help="搜索关键词")
+    sq.add_argument("--source", default=None, help="搜索源: pansou / funletu / all（默认 all）")
+
+    search_sub.add_parser("sources", help="列出可用搜索源")
+
+    sss = search_sub.add_parser("set-source", help="配置自定义搜索源")
+    sss.add_argument("name", help="搜索源名称")
+    sss.add_argument("url", help="搜索源地址")
+
+    ssa = search_sub.add_parser("save", help="搜索并交互式选择转存")
+    ssa.add_argument("keyword", help="搜索关键词")
+    ssa.add_argument("savepath", help="保存路径")
+    ssa.add_argument("--source", default=None, help="搜索源")
+
     # ========== drive ==========
     drive_parser = subparsers.add_parser("drive", help="网盘文件操作")
     drive_sub = drive_parser.add_subparsers(dest="drive_action")
@@ -98,7 +123,7 @@ def create_parser() -> argparse.ArgumentParser:
     rm.add_argument("fid", nargs="+", help="文件 FID（可多个）")
     rm.add_argument("--permanent", action="store_true", help="彻底删除（清空回收站）")
 
-    se = drive_sub.add_parser("search", help="搜索网盘文件")
+    se = drive_sub.add_parser("search", help="搜索网盘内文件")
     se.add_argument("keyword", help="搜索关键词")
     se.add_argument("--path", default="/", help="搜索范围路径")
 
@@ -137,12 +162,13 @@ def main():
         return
 
     # 延迟导入命令处理器
-    from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd
+    from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
 
     handlers = {
         "config": config_cmd.handle,
         "account": account_cmd.handle,
         "share": share_cmd.handle,
+        "search": search_cmd.handle,
         "drive": drive_cmd.handle,
         "task": task_cmd.handle,
     }

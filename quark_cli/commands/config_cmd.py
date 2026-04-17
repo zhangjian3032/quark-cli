@@ -41,5 +41,13 @@ def handle(args):
         cfg.remove_cookie(args.index)
         display.success(f"已移除账号 #{args.index + 1} 的 Cookie")
 
+    elif action == "set-search-source":
+        cfg.load()
+        sources = cfg.data.get("search_sources", {})
+        sources[args.source_name] = args.source_url
+        cfg._data["search_sources"] = sources
+        cfg.save()
+        display.success(f"搜索源已配置: {args.source_name} → {args.source_url}")
+
     else:
-        display.info("用法: quark-cli config {set-cookie|show|path|reset|remove-cookie}")
+        display.info("用法: quark-cli config {set-cookie|show|path|reset|remove-cookie|set-search-source}")

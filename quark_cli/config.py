@@ -14,6 +14,10 @@ DEFAULT_CONFIG_FILE = DEFAULT_CONFIG_DIR / "config.json"
 DEFAULT_CONFIG = {
     "cookie": [],
     "push_config": {},
+    "search_sources": {
+        "pansou": "https://www.pansou.com",
+        "funletu": "https://pan.funletu.com"
+    },
     "magic_regex": {
         "$TV": {
             "pattern": r".*?([Ss]\d{1,2})?(?:[第EePpXx\.\-\_\( ]{1,2}|^)(\d{1,3})(?!\d).*?\.(mp4|mkv)",
