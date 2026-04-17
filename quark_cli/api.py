@@ -179,9 +179,16 @@ class QuarkAPI:
         _fetch_share: int = 0,
         fetch_share_full_path: int = 0,
     ) -> dict:
-        """获取分享详情（文件列表）"""
+        """获取分享详情（文件列表）
+
+        自动处理:
+        - 去掉 ver=2 参数 (部分分享链接在 ver=2 下返回 41004)
+        - 若 pdir_fid=0 返回空列表，自动用 share.first_fid 重试
+        """
         all_items = []
         page = 1
+        first_resp = None
+
         while True:
             url = f"{self.BASE_URL}/1/clouddrive/share/sharepage/detail"
             params = {
@@ -197,12 +204,17 @@ class QuarkAPI:
                 "_fetch_share": _fetch_share,
                 "_fetch_total": "1",
                 "_sort": "file_type:asc,updated_at:desc",
-                "ver": "2",
                 "fetch_share_full_path": fetch_share_full_path,
             }
             resp = self._request("GET", url, params=params).json()
+
             if resp.get("code") != 0:
+                # ver=2 导致 41004 时不再 fallback，因为已经去掉了 ver 参数
                 return resp
+
+            if first_resp is None:
+                first_resp = resp
+
             items = resp["data"]["list"]
             if items:
                 all_items.extend(items)
@@ -211,8 +223,40 @@ class QuarkAPI:
                 break
             if len(all_items) >= resp["metadata"]["_total"]:
                 break
-        resp["data"]["list"] = all_items
-        return resp
+
+        first_resp["data"]["list"] = all_items
+
+        # 自动重试: pdir_fid=0 且列表为空时，尝试用 share.first_fid
+        if not all_items and pdir_fid == "0":
+            share_info = first_resp.get("data", {}).get("share", {})
+            first_fid = share_info.get("first_fid", "")
+            if first_fid:
+                dbg.log("API", f"pdir_fid=0 返回空列表, 用 first_fid={first_fid} 重试")
+                retry_resp = self.get_share_detail(
+                    pwd_id, stoken, first_fid,
+                    _fetch_share=_fetch_share,
+                    fetch_share_full_path=fetch_share_full_path,
+                )
+                if retry_resp.get("code") == 0:
+                    retry_items = retry_resp["data"]["list"]
+                    if retry_items:
+                        first_resp["data"]["list"] = retry_items
+                        # 保留 share 信息
+                        if "share" not in first_resp["data"] and "share" in retry_resp.get("data", {}):
+                            first_resp["data"]["share"] = retry_resp["data"]["share"]
+                        return first_resp
+                    # first_fid 也是空, 可能是单文件分享, 构造一个虚拟列表
+                    if share_info.get("file_num", 0) > 0:
+                        dbg.log("API", "first_fid 也为空, 构造单文件条目")
+                        first_resp["data"]["list"] = [{
+                            "fid": first_fid,
+                            "file_name": share_info.get("title", "未知文件"),
+                            "dir": share_info.get("first_layer_file_categories", [None])[0] == 0,
+                            "share_fid_token": first_fid,
+                            "size": share_info.get("size", 0),
+                        }]
+
+        return first_resp
 
     # ========== 文件操作 ==========
 
