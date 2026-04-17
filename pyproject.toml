@@ -35,6 +35,14 @@ web = [
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
 ]
+bot = [
+    "lark-oapi>=1.4.8",
+]
+all = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "lark-oapi>=1.4.8",
+]
 dev = [
     "pytest>=7.0",
 ]

@@ -244,3 +244,59 @@ def config_set_tmdb(body: TmdbConfigBody):
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 飞书机器人配置 ──
+
+class FeishuBotConfigBody(BaseModel):
+    app_id: Optional[str] = None
+    app_secret: Optional[str] = None
+    base_path: Optional[str] = None
+
+
+@router.get("/config/bot")
+def config_bot_read():
+    """读取飞书机器人配置（脱敏）"""
+    from quark_cli.web.deps import get_config
+    try:
+        cfg = get_config()
+        cfg.load()
+        bot_cfg = cfg.data.get("bot", {}).get("feishu", {})
+
+        app_id = bot_cfg.get("app_id", "")
+        app_secret = bot_cfg.get("app_secret", "")
+
+        return {
+            "app_id": "{}***".format(app_id[:6]) if len(app_id) > 6 else ("***" if app_id else ""),
+            "app_secret": "***{}".format(app_secret[-6:]) if len(app_secret) > 6 else ("***" if app_secret else ""),
+            "base_path": bot_cfg.get("base_path", "/媒体"),
+            "configured": bool(app_id and app_secret),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/config/bot")
+def config_bot_set(body: FeishuBotConfigBody):
+    """更新飞书机器人配置"""
+    from quark_cli.web.deps import get_config
+    try:
+        cfg = get_config()
+        cfg.load()
+        data = cfg.data
+        bot_cfg = data.get("bot", {})
+        feishu = bot_cfg.get("feishu", {})
+
+        if body.app_id is not None:
+            feishu["app_id"] = body.app_id
+        if body.app_secret is not None:
+            feishu["app_secret"] = body.app_secret
+        if body.base_path is not None:
+            feishu["base_path"] = body.base_path
+
+        bot_cfg["feishu"] = feishu
+        data["bot"] = bot_cfg
+        cfg.save()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

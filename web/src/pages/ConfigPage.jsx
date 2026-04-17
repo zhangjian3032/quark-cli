@@ -3,7 +3,7 @@ import {
   User, Crown, HardDrive, Gift, CheckCircle2, XCircle,
   Shield, Loader2, Sparkles, Calendar, TrendingUp,
   Settings, Cookie, Server, Film, Save, Trash2, Plus,
-  Eye, EyeOff, RefreshCw, AlertCircle, FileText,
+  Eye, EyeOff, RefreshCw, AlertCircle, FileText, MessageSquare, Bot,
 } from 'lucide-react'
 import { accountApi, configApi } from '../api/client'
 import { PageSpinner, ErrorBanner, PageHeader } from '../components/UI'
@@ -530,6 +530,142 @@ function TmdbSection({ config, onRefresh }) {
   )
 }
 
+
+/* ════════════════════════════════════════════════
+   Section: 飞书机器人配置
+   ════════════════════════════════════════════════ */
+function FeishuBotSection({ onRefresh }) {
+  const [botConfig, setBotConfig] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState({ app_id: '', app_secret: '', base_path: '/媒体' })
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState(null)
+  const [showSecret, setShowSecret] = useState(false)
+
+  useEffect(() => {
+    configApi.readBot()
+      .then(d => {
+        setBotConfig(d)
+        setForm(f => ({ ...f, base_path: d.base_path || '/媒体' }))
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setToast(null)
+    try {
+      const payload = { base_path: form.base_path }
+      if (form.app_id.trim()) payload.app_id = form.app_id.trim()
+      if (form.app_secret.trim()) payload.app_secret = form.app_secret.trim()
+      await configApi.setBot(payload)
+      setToast({ msg: '配置已保存', type: 'success' })
+      setForm(f => ({ ...f, app_id: '', app_secret: '' }))
+      // reload bot config
+      configApi.readBot().then(d => setBotConfig(d))
+      onRefresh()
+    } catch (e) {
+      setToast({ msg: e.message, type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls = "w-full bg-surface-2 border border-surface-3 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500"
+
+  return (
+    <div className="card p-6 mb-6">
+      <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+        <Bot size={20} className="text-indigo-400" /> 飞书机器人
+      </h3>
+
+      {/* Status */}
+      {!loading && botConfig && (
+        <div className="flex items-center gap-3 mb-4 p-3 bg-surface-2 rounded-lg">
+          <div className={`w-2.5 h-2.5 rounded-full ${botConfig.configured ? 'bg-green-400' : 'bg-gray-600'}`} />
+          <span className="text-sm text-gray-300">
+            {botConfig.configured ? '已配置' : '未配置'}
+          </span>
+          {botConfig.configured && (
+            <span className="text-xs text-gray-500 font-mono ml-auto">
+              APP_ID: {botConfig.app_id}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">App ID</label>
+          <input value={form.app_id}
+            onChange={e => setForm({ ...form, app_id: e.target.value })}
+            placeholder={botConfig?.app_id ? `当前: ${botConfig.app_id}（留空保持不变）` : '飞书应用 App ID'}
+            className={inputCls} />
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">App Secret</label>
+          <div className="relative">
+            <input type={showSecret ? 'text' : 'password'}
+              value={form.app_secret}
+              onChange={e => setForm({ ...form, app_secret: e.target.value })}
+              placeholder={botConfig?.app_secret ? `当前: ${botConfig.app_secret}（留空保持不变）` : '飞书应用 App Secret'}
+              className={inputCls + ' pr-10'} />
+            <button onClick={() => setShowSecret(!showSecret)} type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300">
+              {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="text-xs text-gray-500 mb-1 block">转存基准路径</label>
+          <input value={form.base_path}
+            onChange={e => setForm({ ...form, base_path: e.target.value })}
+            placeholder="/媒体"
+            className={inputCls} />
+        </div>
+      </div>
+
+      <div className="text-[10px] text-gray-600 mb-4">
+        创建飞书应用: <a href="https://open.feishu.cn/app" target="_blank" rel="noreferrer"
+          className="text-brand-400 hover:underline">open.feishu.cn/app</a>
+        {' → '}创建自建应用 → 获取凭证 → 开启机器人能力 → 事件订阅开启长连接模式
+      </div>
+
+      <div className="bg-surface-2 rounded-lg p-4 mb-4">
+        <div className="text-xs text-gray-400 mb-2 flex items-center gap-1.5">
+          <MessageSquare size={12} /> 启动方式
+        </div>
+        <code className="text-xs text-green-400 font-mono">quark-cli bot</code>
+        <div className="text-[10px] text-gray-600 mt-1">
+          或指定凭证: <code className="text-gray-500">quark-cli bot --app-id xxx --app-secret xxx</code>
+        </div>
+      </div>
+
+      <div className="bg-surface-2 rounded-lg p-4 mb-4">
+        <div className="text-xs text-gray-400 mb-2">💡 使用说明</div>
+        <div className="text-xs text-gray-500 space-y-1">
+          <div>• 向机器人发送影视名称即可自动转存，如：<span className="text-gray-300">流浪地球2</span></div>
+          <div>• 搜索剧集：<span className="text-gray-300">tv:三体</span></div>
+          <div>• 指定年份：<span className="text-gray-300">沙丘 2024</span></div>
+          <div>• 仅预览不转存：<span className="text-gray-300">dry:流浪地球2</span></div>
+          <div>• 查看帮助：<span className="text-gray-300">help</span> / 查看状态：<span className="text-gray-300">status</span></div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving}
+          className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-surface-3 disabled:text-gray-600
+                     text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          保存配置
+        </button>
+        <Toast msg={toast?.msg} type={toast?.type} />
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════════════════════
    Main: ConfigPage
    ════════════════════════════════════════════════ */
@@ -572,6 +708,9 @@ export default function ConfigPage() {
 
       {/* TMDB 配置 */}
       <TmdbSection config={config} onRefresh={loadConfig} />
+
+      {/* 飞书机器人 */}
+      <FeishuBotSection onRefresh={loadConfig} />
     </>
   )
 }

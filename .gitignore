@@ -11,3 +11,6 @@ venv/
 env/
 web/node_modules/
 web/package-lock.json
+
+# Web frontend build output
+quark_cli/web/static/

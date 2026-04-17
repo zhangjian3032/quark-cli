@@ -40,6 +40,10 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli media discover --list top_rated        高分影视推荐
   quark-cli media auto-save "流浪地球2"            自动搜索+转存
 
+飞书机器人:
+  quark-cli bot                                    启动飞书影视转存机器人
+  quark-cli bot --app-id <id> --app-secret <key>   指定凭证启动
+
 Web 面板:
   quark-cli serve                                  启动 Web 管理面板
   quark-cli serve --port 8080                      自定义端口
@@ -280,6 +284,13 @@ Web 面板:
     mas.add_argument("--dry-run", action="store_true", default=False,
                       help="仅搜索和排序，不实际转存")
 
+
+    # ========== bot (飞书机器人) ==========
+    bot_parser = subparsers.add_parser("bot", help="启动飞书/Lark 机器人 (影视自动转存)")
+    bot_parser.add_argument("--app-id", help="飞书应用 APP_ID")
+    bot_parser.add_argument("--app-secret", help="飞书应用 APP_SECRET")
+    bot_parser.add_argument("--base-path", default="/媒体", help="转存基准目录 (默认 /媒体)")
+
     # ========== serve (Web 面板) ==========
     serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
     serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
@@ -288,6 +299,58 @@ Web 面板:
     serve_parser.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
 
     return parser
+
+
+def _try_start_bot(config_path):
+    """尝试在后台线程启动飞书机器人，无配置则跳过"""
+    import os
+    from quark_cli.config import ConfigManager
+    from quark_cli.display import info, kvline
+
+    cfg = ConfigManager(config_path)
+    cfg.load()
+    bot_cfg = cfg.data.get("bot", {}).get("feishu", {})
+
+    app_id = bot_cfg.get("app_id") or os.environ.get("FEISHU_APP_ID", "")
+    app_secret = bot_cfg.get("app_secret") or os.environ.get("FEISHU_APP_SECRET", "")
+
+    if not app_id or not app_secret:
+        info("飞书机器人: 未配置 APP_ID/APP_SECRET，跳过启动")
+        return
+
+    try:
+        from quark_cli.bot.lark_bot import QuarkLarkBot
+    except ImportError:
+        info("飞书机器人: lark-oapi 未安装，跳过启动 (pip install lark-oapi)")
+        return
+
+    base_path = bot_cfg.get("base_path", "/媒体")
+    import threading
+
+    def _run_bot():
+        import logging
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+        )
+        try:
+            bot = QuarkLarkBot(
+                app_id=app_id,
+                app_secret=app_secret,
+                config_path=config_path,
+                base_path=base_path,
+            )
+            bot.start()
+        except Exception as e:
+            logging.getLogger("quark_cli.bot").error("飞书机器人启动失败: %s", e)
+
+    t = threading.Thread(target=_run_bot, daemon=True)
+    t.start()
+
+    from quark_cli.display import success
+    success("飞书机器人: 已在后台启动")
+    kvline("  APP_ID", "{}***".format(app_id[:6]) if len(app_id) > 6 else "***")
+    kvline("  基准路径", base_path)
 
 
 def _serve(args):
@@ -308,8 +371,9 @@ def _serve(args):
     no_open = getattr(args, "no_open", False)
 
     # 设置配置路径
+    config_path = getattr(args, "config", None)
     from quark_cli.web.deps import set_config_path
-    set_config_path(getattr(args, "config", None))
+    set_config_path(config_path)
 
     from quark_cli.display import success, info, kvline
     success("启动 Quark CLI Web 面板")
@@ -317,6 +381,10 @@ def _serve(args):
     kvline("API 文档", "http://{}:{}/api/docs".format("127.0.0.1" if host == "0.0.0.0" else host, port))
     if reload:
         info("开发模式: 热重载已启用")
+
+    # 尝试在后台启动飞书机器人
+    if not reload:
+        _try_start_bot(config_path)
 
     # 自动打开浏览器
     if not no_open and not reload:
@@ -332,6 +400,53 @@ def _serve(args):
         reload=reload,
         log_level="info",
     )
+
+
+def _bot(args):
+    """启动飞书机器人"""
+    try:
+        from quark_cli.bot.lark_bot import start_bot
+    except ImportError:
+        from quark_cli.display import error, info
+        error("缺少飞书 SDK 依赖，请安装:")
+        info("  pip install lark-oapi>=1.4.8")
+        import sys
+        sys.exit(1)
+
+    from quark_cli.display import success, info, kvline
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
+
+    app_id = getattr(args, "app_id", None)
+    app_secret = getattr(args, "app_secret", None)
+    base_path = getattr(args, "base_path", "/媒体")
+    config_path = getattr(args, "config", None)
+
+    success("启动飞书影视转存机器人")
+    kvline("模式", "WebSocket 长连接")
+    if base_path:
+        kvline("基准路径", base_path)
+    info("按 Ctrl+C 停止")
+    print()
+
+    try:
+        start_bot(
+            config_path=config_path,
+            app_id=app_id,
+            app_secret=app_secret,
+            base_path=base_path,
+        )
+    except ValueError as e:
+        from quark_cli.display import error
+        error(str(e))
+        import sys
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n\n  机器人已停止")
+
 
 
 def main():
@@ -360,6 +475,13 @@ def main():
     if args.command == "serve":
         _serve(args)
         return
+
+    # bot 命令特殊处理
+    if args.command == "bot":
+        _bot(args)
+        return
+
+
 
     handlers = {
         "config": config_cmd.handle,

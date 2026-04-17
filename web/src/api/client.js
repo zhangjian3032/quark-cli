@@ -48,6 +48,8 @@ export const configApi = {
   removeCookie: (index = 0)               => del_('/config/cookie', { index }),
   setFnos:      (data)                    => put('/config/fnos', data),
   setTmdb:      (data)                    => put('/config/tmdb', data),
+  readBot:      ()                        => request('/config/bot'),
+  setBot:       (data)                    => put('/config/bot', data),
 }
 
 // ── Drive (网盘文件) ──
