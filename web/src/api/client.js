@@ -78,8 +78,18 @@ export const shareApi = {
   check:    (url)                       => request(`/share/check?url=${encodeURIComponent(url)}`),
   list:     (url)                       => request(`/share/list?url=${encodeURIComponent(url)}`),
   subdir:   (url, pdirFid)             => request(`/share/subdir?url=${encodeURIComponent(url)}&pdir_fid=${encodeURIComponent(pdirFid)}`),
-  save:     (url, savePath, password, fidList, fidTokenList)   =>
-    post('/share/save', { url, save_path: savePath, password, fid_list: fidList, fid_token_list: fidTokenList }),
+  save:     (url, savePath, password, fidList, fidTokenList, renamePattern, renameReplace) =>
+    post('/share/save', {
+      url, save_path: savePath, password,
+      fid_list: fidList, fid_token_list: fidTokenList,
+      rename_pattern: renamePattern, rename_replace: renameReplace,
+    }),
+}
+
+// ── Rename (正则重命名) ──
+export const renameApi = {
+  presets:  ()                          => request('/rename/presets'),
+  preview:  (url, pattern, replace)     => post('/rename/preview', { url, pattern, replace }),
 }
 
 // ── Media (影视) ──

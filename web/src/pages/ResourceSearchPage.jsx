@@ -4,10 +4,10 @@ import {
   Download, Folder, ChevronRight, ChevronDown, Home, FolderPlus,
   File, FileVideo, Loader2, CheckCircle2, XCircle, Link,
   Film, AlertCircle, Sparkles, ArrowRight, Eye,
-  FolderOpen, FileText, Zap, Tag, Check, Square, CheckSquare,
+  FolderOpen, FileText, Zap, Tag, Check, Square, CheckSquare, Wand2, Replace, RotateCcw,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
-import { searchApi, shareApi, driveApi, mediaApi, discoveryApi } from '../api/client'
+import { searchApi, shareApi, driveApi, mediaApi, discoveryApi, renameApi } from '../api/client'
 import { PageHeader, PageSpinner, EmptyState, ErrorBanner } from '../components/UI'
 
 /* ════════════════════════════════════════════════
@@ -303,6 +303,42 @@ function formatBytes(bytes) {
 }
 
 /* ════════════════════════════════════════════════
+   转存后重命名结果预览
+   ════════════════════════════════════════════════ */
+function RenameResultPreview({ details }) {
+  const [expanded, setExpanded] = useState(true)
+
+  if (!details?.length) return null
+
+  return (
+    <div className="border-t border-white/5">
+      <button onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs text-purple-400 hover:text-purple-300 transition-colors">
+        <Wand2 size={12} />
+        <span>重命名结果 · {details.length} 个文件</span>
+        <ChevronRight size={12} className={`ml-auto transition-transform ${expanded ? 'rotate-90' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="max-h-[200px] overflow-y-auto">
+          {details.map((d, i) => (
+            <div key={i} className="flex items-center gap-2 px-4 py-1.5 text-xs
+                                     border-b border-white/[0.02] hover:bg-surface-2">
+              <span className="text-gray-500 truncate flex-1 line-through" title={d.original}>
+                {d.original}
+              </span>
+              <ArrowRight size={10} className="text-purple-500/50 flex-shrink-0" />
+              <span className="text-purple-300 truncate flex-1 font-medium" title={d.renamed}>
+                {d.renamed}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ════════════════════════════════════════════════
    分享预览面板 (增强版 — 支持目录展开 + 选择性转存)
    ════════════════════════════════════════════════ */
 function SharePreview({ url, keyword, suggestedPath, onSaved }) {
@@ -320,6 +356,14 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
   // 全选模式 (默认全选)
   const [selectAll, setSelectAll] = useState(true)
 
+  // ── 正则重命名 ──
+  const [showRename, setShowRename] = useState(false)
+  const [renamePattern, setRenamePattern] = useState('')
+  const [renameReplace, setRenameReplace] = useState('')
+  const [presets, setPresets] = useState(null)
+  const [renamePreview, setRenamePreview] = useState(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+
   useEffect(() => {
     setLoading(true)
     setError(null)
@@ -327,6 +371,10 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
     setDirState({})
     setSelected(new Set())
     setSelectAll(true)
+    setShowRename(false)
+    setRenamePattern('')
+    setRenameReplace('')
+    setRenamePreview(null)
     shareApi.list(url)
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
@@ -453,7 +501,10 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
         }
       }
 
-      const result = await shareApi.save(url, savePath, '', fidList, fidTokenList)
+      const result = await shareApi.save(
+            url, savePath, '', fidList, fidTokenList,
+            renamePattern || undefined, renameReplace || undefined,
+          )
       setSaveResult(result)
       if (onSaved) onSaved(result)
     } catch (e) {
@@ -632,6 +683,163 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
         </div>
       </div>
 
+      {/* ── 正则重命名面板 ── */}
+      <div className="px-4 py-2 border-b border-white/5 flex items-center gap-2">
+        <button
+          onClick={() => {
+            if (!showRename && !presets) {
+              renameApi.presets().then(d => setPresets(d)).catch(() => {})
+            }
+            setShowRename(s => !s)
+          }}
+          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg transition-colors
+            ${showRename ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300 hover:bg-surface-2'}`}
+        >
+          <Wand2 size={13} />
+          正则重命名
+        </button>
+        {renamePattern && (
+          <span className="text-[10px] text-purple-400/70 truncate">
+            {renamePattern} → {renameReplace}
+          </span>
+        )}
+      </div>
+
+      {showRename && (
+        <div className="px-4 py-3 border-b border-white/5 bg-surface-1/50 space-y-3">
+          {/* 预设快捷按钮 */}
+          {presets?.presets?.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] text-gray-600 flex-shrink-0">预设:</span>
+              {presets.presets.map(p => (
+                <button
+                  key={p.name}
+                  onClick={() => { setRenamePattern(p.name); setRenameReplace(p.replace); setRenamePreview(null) }}
+                  className={`text-[10px] px-2 py-1 rounded transition-colors
+                    ${renamePattern === p.name
+                      ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/30'
+                      : 'bg-surface-2 text-gray-400 hover:text-gray-200 hover:bg-surface-3'
+                    }`}
+                  title={p.description}
+                >
+                  {p.name}
+                </button>
+              ))}
+              {renamePattern && (
+                <button
+                  onClick={() => { setRenamePattern(''); setRenameReplace(''); setRenamePreview(null) }}
+                  className="text-[10px] text-gray-600 hover:text-gray-400 flex items-center gap-0.5"
+                >
+                  <RotateCcw size={10} /> 清除
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* 输入框 */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] text-gray-600 mb-1 block">匹配 (pattern)</label>
+              <input
+                type="text"
+                value={renamePattern}
+                onChange={e => { setRenamePattern(e.target.value); setRenamePreview(null) }}
+                placeholder="正则表达式或 $TV"
+                className="input text-xs py-1.5 w-full font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-600 mb-1 block">替换 (replace)</label>
+              <input
+                type="text"
+                value={renameReplace}
+                onChange={e => { setRenameReplace(e.target.value); setRenamePreview(null) }}
+                placeholder="替换模板，如 {TASKNAME}E{E}.{EXT}"
+                className="input text-xs py-1.5 w-full font-mono"
+              />
+            </div>
+          </div>
+
+          {/* 魔法变量提示 */}
+          {presets?.variables?.length > 0 && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-gray-600 flex-shrink-0">变量:</span>
+              {presets.variables.map(v => (
+                <button
+                  key={v.name}
+                  onClick={() => setRenameReplace(r => r + v.name)}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-surface-2 text-gray-500
+                             hover:text-purple-300 hover:bg-purple-500/10 transition-colors font-mono"
+                  title={v.description}
+                >
+                  {v.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* 预览按钮 */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                if (!renamePattern && !renameReplace) return
+                setPreviewLoading(true)
+                try {
+                  const result = await renameApi.preview(url, renamePattern, renameReplace)
+                  setRenamePreview(result)
+                } catch (e) {
+                  setRenamePreview({ error: e.message })
+                } finally {
+                  setPreviewLoading(false)
+                }
+              }}
+              disabled={previewLoading || (!renamePattern && !renameReplace)}
+              className="btn-primary text-xs py-1.5 flex items-center gap-1.5"
+            >
+              {previewLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+              预览效果
+            </button>
+            {renamePreview?.items && (
+              <span className="text-[10px] text-gray-500">
+                {renamePreview.items.filter(i => i.changed).length} 个文件将被重命名，
+                {renamePreview.items.filter(i => i.filtered).length} 个被过滤
+              </span>
+            )}
+          </div>
+
+          {/* 预览结果 */}
+          {renamePreview?.error && (
+            <div className="text-xs text-red-400 flex items-center gap-1">
+              <XCircle size={12} /> {renamePreview.error}
+            </div>
+          )}
+          {renamePreview?.items?.length > 0 && (
+            <div className="max-h-[200px] overflow-y-auto rounded-lg border border-white/5">
+              {renamePreview.items.map((item, i) => (
+                <div key={i} className={`flex items-center gap-2 px-3 py-1.5 text-xs border-b border-white/[0.03]
+                  ${item.filtered ? 'opacity-30' : ''}`}>
+                  <span className="text-gray-500 truncate flex-1" title={item.original}>
+                    {item.original}
+                  </span>
+                  {item.changed && !item.filtered ? (
+                    <>
+                      <Replace size={11} className="text-purple-400 flex-shrink-0" />
+                      <span className="text-purple-300 truncate flex-1 font-medium" title={item.renamed}>
+                        {item.renamed}
+                      </span>
+                    </>
+                  ) : item.filtered ? (
+                    <span className="text-red-400/50 text-[10px] flex-shrink-0">过滤</span>
+                  ) : (
+                    <span className="text-gray-600 text-[10px] flex-shrink-0">不变</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* File list with tree */}
       <div className="max-h-[400px] overflow-y-auto">
         {data?.items?.map(item => renderFileRow(item, 0))}
@@ -644,9 +852,15 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
           {saveResult.error
             ? <><XCircle size={16} /> 转存失败: {saveResult.error}</>
             : <><CheckCircle2 size={16} /> 成功转存 {saveResult.saved} 个文件到 {saveResult.path}
-                {saveResult.skipped > 0 && `（跳过 ${saveResult.skipped} 个已存在）`}</>
+                {saveResult.skipped > 0 && `（跳过 ${saveResult.skipped} 个已存在）`}
+                {saveResult.renamed > 0 && `，重命名 ${saveResult.renamed} 个`}</>
           }
         </div>
+      )}
+
+      {/* 转存后重命名详情 */}
+      {saveResult?.rename_details?.length > 0 && (
+        <RenameResultPreview details={saveResult.rename_details} />
       )}
 
       {/* 转存后预览 */}

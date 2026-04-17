@@ -147,11 +147,21 @@ class SearchService:
             "items": items,
         }
 
-    def share_save(self, url, save_path, password="", fid_list=None, fid_token_list=None):
+    def share_save(self, url, save_path, password="", fid_list=None, fid_token_list=None,
+                   rename_pattern="", rename_replace=""):
         """转存分享链接到指定目录
 
+        Args:
+            url: 分享链接
+            save_path: 保存路径
+            password: 提取码
+            fid_list: 指定文件 fid (选择性转存)
+            fid_token_list: 指定文件 token (选择性转存)
+            rename_pattern: 正则匹配模式 (支持 $TV 等预设)
+            rename_replace: 正则替换模板 (支持 {E} 等魔法变量)
+
         Returns:
-            dict: {saved, skipped, path, fids} or {error}
+            dict: {saved, skipped, renamed, path, fids} or {error}
         """
         pwd_id, passcode, pdir_fid, paths = QuarkAPI.extract_share_url(url)
         if not pwd_id:
@@ -191,6 +201,20 @@ class SearchService:
                 if detail.get("code") == 0:
                     file_list = detail["data"]["list"]
 
+        # ── 正则过滤 (rename_pattern 可用于筛选) ──
+        mr = None
+        if rename_pattern or rename_replace:
+            from quark_cli.rename import MagicRename
+            mr = MagicRename()
+            # 用 pattern 过滤: 不匹配的文件排除
+            if rename_pattern:
+                file_list = [
+                    f for f in file_list
+                    if f.get("dir") or mr.match(rename_pattern, f.get("file_name", ""))
+                ]
+                if not file_list:
+                    return {"error": "正则过滤后没有匹配的文件"}
+
         # 创建/获取目标目录
         save_path_n = re.sub(r"/{2,}", "/", "/{}".format(save_path))
         fids = self._client.get_fids([save_path_n])
@@ -212,15 +236,15 @@ class SearchService:
         skipped = len(file_list) - len(to_save)
 
         if not to_save:
-            return {"saved": 0, "skipped": skipped, "path": save_path_n, "fids": []}
+            return {"saved": 0, "skipped": skipped, "renamed": 0, "path": save_path_n, "fids": []}
 
         # 分批转存
         saved_fids = []
         for i in range(0, len(to_save), 100):
             batch = to_save[i:i + 100]
-            fid_list = [f["fid"] for f in batch]
+            batch_fid_list = [f["fid"] for f in batch]
             token_list = [f["share_fid_token"] for f in batch]
-            save_resp = self._client.save_file(fid_list, token_list, to_pdir_fid, pwd_id, stoken)
+            save_resp = self._client.save_file(batch_fid_list, token_list, to_pdir_fid, pwd_id, stoken)
 
             if save_resp.get("code") == 0:
                 task_id = save_resp["data"]["task_id"]
@@ -229,10 +253,73 @@ class SearchService:
                     new_fids = task_resp["data"]["save_as"]["save_as_top_fids"]
                     saved_fids.extend(new_fids)
 
-        return {
+        # ── 转存后重命名 ──
+        renamed_count = 0
+        rename_details = []
+        if mr and rename_replace and len(to_save) == len(saved_fids):
+            for idx, f in enumerate(to_save):
+                if f.get("dir"):
+                    continue
+                old_name = f["file_name"]
+                new_name = mr.rename(rename_pattern, rename_replace, old_name)
+                if new_name and new_name != old_name:
+                    new_fid = saved_fids[idx]
+                    ret = self._client.rename(new_fid, new_name)
+                    if ret.get("code") == 0:
+                        renamed_count += 1
+                        rename_details.append({
+                            "original": old_name,
+                            "renamed": new_name,
+                        })
+
+        result = {
             "saved": len(saved_fids),
             "skipped": skipped,
+            "renamed": renamed_count,
             "path": save_path_n,
             "fids": saved_fids,
             "total_files": len(file_list),
+        }
+        if rename_details:
+            result["rename_details"] = rename_details
+        return result
+
+    # ── 正则重命名相关 ──
+
+    def rename_preview(self, url, pattern, replace):
+        """预览正则替换效果 (不实际操作)
+
+        Args:
+            url: 分享链接
+            pattern: 正则模式
+            replace: 替换模板
+
+        Returns:
+            dict: {items: [{original, renamed, changed, filtered}]}
+        """
+        from quark_cli.rename import MagicRename
+
+        # 获取文件列表
+        list_result = self.share_list(url)
+        if "error" in list_result:
+            return list_result
+
+        mr = MagicRename()
+        file_names = [
+            item["file_name"]
+            for item in list_result.get("items", [])
+            if not item.get("is_dir")
+        ]
+
+        preview = mr.preview_batch(pattern, replace, file_names)
+        return {"items": preview}
+
+    def rename_presets(self):
+        """获取可用的正则预设和魔法变量"""
+        from quark_cli.rename import MagicRename
+
+        mr = MagicRename()
+        return {
+            "presets": mr.list_presets(),
+            "variables": mr.list_variables(),
         }
