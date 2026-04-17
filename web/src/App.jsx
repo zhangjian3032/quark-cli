@@ -1,5 +1,5 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Film, Search, Star, Clapperboard, Activity, HardDrive, Globe } from 'lucide-react'
+import { Film, Search, Star, Clapperboard, Activity, HardDrive, Globe, Settings } from 'lucide-react'
 import LibraryPage from './pages/LibraryPage'
 import SearchPage from './pages/SearchPage'
 import DetailPage from './pages/DetailPage'
@@ -7,6 +7,7 @@ import DiscoverPage from './pages/DiscoverPage'
 import MetaPage from './pages/MetaPage'
 import DrivePage from './pages/DrivePage'
 import ResourceSearchPage from './pages/ResourceSearchPage'
+import ConfigPage from './pages/ConfigPage'
 
 const NAV_SECTIONS = [
   {
@@ -14,6 +15,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/drive',           icon: HardDrive,    label: '文件管理' },
       { to: '/resource-search', icon: Globe,         label: '搜索转存' },
+      { to: '/config',          icon: Settings,      label: '配置' },
     ],
   },
   {
@@ -98,6 +100,7 @@ export default function App() {
             <Route path="/meta" element={<MetaPage />} />
             <Route path="/drive" element={<DrivePage />} />
             <Route path="/resource-search" element={<ResourceSearchPage />} />
+            <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </div>
       </main>

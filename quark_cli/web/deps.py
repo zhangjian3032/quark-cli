@@ -10,7 +10,6 @@ _config_path = None
 def set_config_path(path):
     global _config_path
     _config_path = path
-    # 清除缓存
     get_config.cache_clear()
 
 
@@ -22,7 +21,6 @@ def get_config():
 # ── 夸克网盘 ──
 
 def get_quark_client():
-    """创建 QuarkAPI 客户端"""
     from quark_cli.api import QuarkAPI
     cfg = get_config()
     cookies = cfg.get_cookies()
@@ -32,34 +30,31 @@ def get_quark_client():
 
 
 def get_drive_service():
-    """创建 DriveService"""
     from quark_cli.services.drive_service import DriveService
-    client = get_quark_client()
-    return DriveService(client)
+    return DriveService(get_quark_client())
 
 
 def get_search_service():
-    """创建 SearchService"""
     from quark_cli.services.search_service import SearchService
     from quark_cli.search import PanSearch
-    client = get_quark_client()
     cfg = get_config()
     cfg.load()
-    searcher = PanSearch(cfg)
-    return SearchService(client, searcher)
+    return SearchService(get_quark_client(), PanSearch(cfg))
+
+
+def get_account_service():
+    from quark_cli.services.account_service import AccountService
+    return AccountService(get_quark_client())
 
 
 # ── 影视媒体中心 ──
 
 def get_media_provider():
-    """创建 Media Provider 实例"""
     from quark_cli.media.registry import create_provider
     from quark_cli.media.fnos.config import FnosConfig
-
     cfg = get_config()
     media_cfg = cfg.data.get("media", {})
     provider_name = media_cfg.get("provider", "fnos")
-
     if provider_name == "fnos":
         fnos_data = media_cfg.get("fnos", {})
         config = FnosConfig.from_dict(fnos_data)
@@ -70,18 +65,14 @@ def get_media_provider():
 
 
 def get_media_service():
-    """创建 MediaService"""
     from quark_cli.services.media_service import MediaService
-    provider = get_media_provider()
-    return MediaService(provider)
+    return MediaService(get_media_provider())
 
 
 # ── TMDB 发现 ──
 
 def get_tmdb_source():
-    """创建 TMDB 数据源"""
     from quark_cli.media.discovery.tmdb import TmdbSource
-
     cfg = get_config()
     media_cfg = cfg.data.get("media", {})
     disc = media_cfg.get("discovery", {})
@@ -96,7 +87,6 @@ def get_tmdb_source():
 
 
 def get_discovery_service():
-    """创建 DiscoveryService"""
     from quark_cli.services.discovery_service import DiscoveryService
     source = get_tmdb_source()
     if not source:

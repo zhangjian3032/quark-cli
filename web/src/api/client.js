@@ -18,6 +18,38 @@ function post(path, data) {
   })
 }
 
+function put(path, data) {
+  return request(path, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+function del_(path, data) {
+  return request(path, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+// ── Account (账号) ──
+export const accountApi = {
+  info:     ()  => request('/account/info'),
+  verify:   ()  => request('/account/verify'),
+  sign:     ()  => post('/account/sign', {}),
+}
+
+// ── Config (配置) ──
+export const configApi = {
+  read:         ()                        => request('/config'),
+  setCookie:    (cookie, index = 0)       => put('/config/cookie', { cookie, index }),
+  removeCookie: (index = 0)               => del_('/config/cookie', { index }),
+  setFnos:      (data)                    => put('/config/fnos', data),
+  setTmdb:      (data)                    => put('/config/tmdb', data),
+}
+
 // ── Drive (网盘文件) ──
 export const driveApi = {
   ls:       (path = '/')                => request(`/drive/ls?path=${encodeURIComponent(path)}`),
