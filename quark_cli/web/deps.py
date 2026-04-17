@@ -38,6 +38,17 @@ def get_drive_service():
     return DriveService(client)
 
 
+def get_search_service():
+    """创建 SearchService"""
+    from quark_cli.services.search_service import SearchService
+    from quark_cli.search import PanSearch
+    client = get_quark_client()
+    cfg = get_config()
+    cfg.load()
+    searcher = PanSearch(cfg)
+    return SearchService(client, searcher)
+
+
 # ── 影视媒体中心 ──
 
 def get_media_provider():

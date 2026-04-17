@@ -18,7 +18,7 @@ function post(path, data) {
   })
 }
 
-// ── Drive (网盘) ──
+// ── Drive (网盘文件) ──
 export const driveApi = {
   ls:       (path = '/')                => request(`/drive/ls?path=${encodeURIComponent(path)}`),
   mkdir:    (path)                      => post('/drive/mkdir', { path }),
@@ -27,6 +27,23 @@ export const driveApi = {
   download: (fid)                       => request(`/drive/download?fid=${encodeURIComponent(fid)}`),
   search:   (keyword, path = '/')       => request(`/drive/search?keyword=${encodeURIComponent(keyword)}&path=${encodeURIComponent(path)}`),
   space:    ()                          => request('/drive/space'),
+}
+
+// ── Search (资源搜索) ──
+export const searchApi = {
+  query:    (keyword, source = null)    => {
+    let url = `/search/query?keyword=${encodeURIComponent(keyword)}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
+    return request(url)
+  },
+  sources:  ()                          => request('/search/sources'),
+}
+
+// ── Share (分享链接) ──
+export const shareApi = {
+  check:    (url)                       => request(`/share/check?url=${encodeURIComponent(url)}`),
+  list:     (url)                       => request(`/share/list?url=${encodeURIComponent(url)}`),
+  save:     (url, savePath, password)   => post('/share/save', { url, save_path: savePath, password }),
 }
 
 // ── Media (影视) ──
