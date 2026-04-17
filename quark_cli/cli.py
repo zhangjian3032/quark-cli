@@ -40,6 +40,10 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli media discover --list top_rated        高分影视推荐
   quark-cli media auto-save "流浪地球2"            自动搜索+转存
 
+Web 面板:
+  quark-cli serve                                  启动 Web 管理面板
+  quark-cli serve --port 8080                      自定义端口
+
 调试模式:
   quark-cli --debug search query "关键词"          启用 debug 输出
         """,
@@ -276,7 +280,58 @@ def create_parser() -> argparse.ArgumentParser:
     mas.add_argument("--dry-run", action="store_true", default=False,
                       help="仅搜索和排序，不实际转存")
 
+    # ========== serve (Web 面板) ==========
+    serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
+    serve_parser.add_argument("--port", type=int, default=9090, help="监听端口 (默认 9090)")
+    serve_parser.add_argument("--reload", action="store_true", help="开发模式: 热重载")
+    serve_parser.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
+
     return parser
+
+
+def _serve(args):
+    """启动 FastAPI Web 服务"""
+    try:
+        import uvicorn
+    except ImportError:
+        from quark_cli.display import error, info
+        error("缺少 Web 依赖，请安装:")
+        info("  pip install 'quark-cli[web]'")
+        info("  # 或: pip install fastapi uvicorn")
+        import sys
+        sys.exit(1)
+
+    host = getattr(args, "host", "0.0.0.0")
+    port = getattr(args, "port", 9090)
+    reload = getattr(args, "reload", False)
+    no_open = getattr(args, "no_open", False)
+
+    # 设置配置路径
+    from quark_cli.web.deps import set_config_path
+    set_config_path(getattr(args, "config", None))
+
+    from quark_cli.display import success, info, kvline
+    success("启动 Quark CLI Web 面板")
+    kvline("地址", "http://{}:{}".format("127.0.0.1" if host == "0.0.0.0" else host, port))
+    kvline("API 文档", "http://{}:{}/api/docs".format("127.0.0.1" if host == "0.0.0.0" else host, port))
+    if reload:
+        info("开发模式: 热重载已启用")
+
+    # 自动打开浏览器
+    if not no_open and not reload:
+        import threading, webbrowser
+        url = "http://{}:{}".format("127.0.0.1" if host == "0.0.0.0" else host, port)
+        threading.Timer(1.5, webbrowser.open, args=[url]).start()
+
+    uvicorn.run(
+        "quark_cli.web.app:create_app",
+        factory=True,
+        host=host,
+        port=port,
+        reload=reload,
+        log_level="info",
+    )
 
 
 def main():
@@ -300,6 +355,11 @@ def main():
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
     from quark_cli.commands import media_cmd
+
+    # serve 命令特殊处理 (不通过 handlers dict)
+    if args.command == "serve":
+        _serve(args)
+        return
 
     handlers = {
         "config": config_cmd.handle,

@@ -1,0 +1,70 @@
+"""Web 层依赖注入 — 从配置创建 Service 实例"""
+
+from functools import lru_cache
+from quark_cli.config import ConfigManager
+
+
+_config_path = None
+
+
+def set_config_path(path):
+    global _config_path
+    _config_path = path
+    # 清除缓存
+    get_config.cache_clear()
+
+
+@lru_cache()
+def get_config():
+    return ConfigManager(config_path=_config_path)
+
+
+def get_media_provider():
+    """创建 Media Provider 实例"""
+    from quark_cli.media.registry import create_provider
+    from quark_cli.media.fnos.config import FnosConfig
+
+    cfg = get_config()
+    media_cfg = cfg.data.get("media", {})
+    provider_name = media_cfg.get("provider", "fnos")
+
+    if provider_name == "fnos":
+        fnos_data = media_cfg.get("fnos", {})
+        config = FnosConfig.from_dict(fnos_data)
+        config = FnosConfig.from_env(config)
+        config.validate()
+        return create_provider("fnos", config)
+    raise ValueError("未知 provider: {}".format(provider_name))
+
+
+def get_media_service():
+    """创建 MediaService"""
+    from quark_cli.services.media_service import MediaService
+    provider = get_media_provider()
+    return MediaService(provider)
+
+
+def get_tmdb_source():
+    """创建 TMDB 数据源"""
+    from quark_cli.media.discovery.tmdb import TmdbSource
+
+    cfg = get_config()
+    media_cfg = cfg.data.get("media", {})
+    disc = media_cfg.get("discovery", {})
+    api_key = disc.get("tmdb_api_key", "")
+    if not api_key:
+        return None
+    return TmdbSource(
+        api_key=api_key,
+        language=disc.get("language", "zh-CN"),
+        region=disc.get("region", "CN"),
+    )
+
+
+def get_discovery_service():
+    """创建 DiscoveryService"""
+    from quark_cli.services.discovery_service import DiscoveryService
+    source = get_tmdb_source()
+    if not source:
+        return None
+    return DiscoveryService(source)

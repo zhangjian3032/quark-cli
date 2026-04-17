@@ -1,0 +1,81 @@
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Film, Search, Star, Clapperboard, Activity } from 'lucide-react'
+import LibraryPage from './pages/LibraryPage'
+import SearchPage from './pages/SearchPage'
+import DetailPage from './pages/DetailPage'
+import DiscoverPage from './pages/DiscoverPage'
+import MetaPage from './pages/MetaPage'
+
+const NAV = [
+  { to: '/',         icon: Film,         label: '媒体库' },
+  { to: '/search',   icon: Search,       label: '搜索' },
+  { to: '/discover', icon: Star,         label: '发现' },
+  { to: '/meta',     icon: Clapperboard, label: '元数据' },
+]
+
+function Sidebar() {
+  return (
+    <aside className="fixed left-0 top-0 bottom-0 w-[220px] bg-surface-1 border-r border-surface-3
+                       flex flex-col z-30">
+      {/* Logo */}
+      <div className="h-16 flex items-center gap-3 px-5 border-b border-surface-3">
+        <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center font-bold text-sm">
+          Q
+        </div>
+        <div>
+          <div className="font-semibold text-sm text-white">Quark CLI</div>
+          <div className="text-[10px] text-gray-500">Media Dashboard</div>
+        </div>
+      </div>
+
+      {/* Nav */}
+      <nav className="flex-1 py-4 px-3 space-y-1">
+        {NAV.map(({ to, icon: Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={to === '/'}
+            className={({ isActive }) =>
+              `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
+              ${isActive
+                ? 'bg-brand-600/15 text-brand-400'
+                : 'text-gray-400 hover:text-white hover:bg-surface-2'
+              }`
+            }
+          >
+            <Icon size={18} />
+            {label}
+          </NavLink>
+        ))}
+      </nav>
+
+      {/* Footer */}
+      <div className="px-5 py-3 border-t border-surface-3">
+        <div className="flex items-center gap-2 text-[10px] text-gray-600">
+          <Activity size={12} />
+          <span>v2.2.0</span>
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+export default function App() {
+  return (
+    <div className="flex min-h-screen">
+      <Sidebar />
+      <main className="flex-1 ml-[220px]">
+        <div className="max-w-7xl mx-auto p-6">
+          <Routes>
+            <Route path="/" element={<LibraryPage />} />
+            <Route path="/library/:libId" element={<LibraryPage />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/detail/:guid" element={<DetailPage />} />
+            <Route path="/discover" element={<DiscoverPage />} />
+            <Route path="/meta" element={<MetaPage />} />
+          </Routes>
+        </div>
+      </main>
+    </div>
+  )
+}
