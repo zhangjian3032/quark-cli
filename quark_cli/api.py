@@ -12,6 +12,8 @@ import requests
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 
+from quark_cli import debug as dbg
+
 
 class QuarkAPI:
     """夸克网盘 API 客户端"""
@@ -85,10 +87,24 @@ class QuarkAPI:
             )
             del headers["cookie"]
 
+        # Debug: 打印请求
+        dbg.log_request(method, url, params=kwargs.get("params"), body=kwargs.get("json"))
+
         try:
+            t0 = time.time()
             response = requests.request(method, url, headers=headers, timeout=30, **kwargs)
+            elapsed_ms = (time.time() - t0) * 1000
+
+            # Debug: 打印响应
+            try:
+                resp_body = response.json()
+            except Exception:
+                resp_body = response.text[:500] if response.text else None
+            dbg.log_response(response.status_code, url, body=resp_body, elapsed_ms=elapsed_ms)
+
             return response
         except Exception as e:
+            dbg.log("API", f"请求异常: {e}")
             fake = requests.Response()
             fake.status_code = 500
             fake._content = json.dumps(

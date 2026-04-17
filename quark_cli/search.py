@@ -8,31 +8,27 @@
 
 import re
 import json
+import time
 import requests
 from typing import Dict, List, Optional
 from urllib.parse import quote, urljoin
+
+from quark_cli import debug as dbg
 
 
 class PanSearch:
     """网盘资源搜索引擎聚合器"""
 
-    # 默认搜索源配置
+    # 默认搜索源配置 - pansou 使用 JSON API 模式
     DEFAULT_SOURCES = {
         "pansou": {
             "name": "盘搜",
             "base_url": "https://www.pansou.com",
-            "type": "html",
-            "search_path": "/s?q={keyword}&pan=quark",
-            "link_pattern": r'href="(https?://pan\.quark\.cn/s/[a-zA-Z0-9]+)"',
-            "title_pattern": r'class="item-title[^"]*"[^>]*>([^<]+)<',
-        },
-        "funletu": {
-            "name": "盘乐趣",
-            "base_url": "https://pan.funletu.com",
-            "type": "html",
-            "search_path": "/search?keyword={keyword}&type=quark",
-            "link_pattern": r'href="(https?://pan\.quark\.cn/s/[a-zA-Z0-9]+)"',
-            "title_pattern": r'title="([^"]+)"',
+            "type": "api",
+            "api_path": "/api/search",
+            "api_params": {"kw": "{keyword}", "res": "merge", "src": "all"},
+            "result_path": "data.merged_by_type",
+            "filter_types": ["quark"],
         },
     }
 
@@ -59,16 +55,19 @@ class PanSearch:
                         # 完整配置对象
                         self.sources[name] = value
 
+        dbg.log("Search", f"已加载 {len(self.sources)} 个搜索源: {list(self.sources.keys())}")
+
     def _add_url_source(self, name: str, url: str):
         """根据 URL 自动判断并添加搜索源"""
         url = url.rstrip("/")
-        # 如果已有同名源，仅覆盖 base_url
+        # 如果已有同名源（如 pansou），覆盖 base_url，保留 API 配置
         if name in self.sources:
             self.sources[name]["base_url"] = url
+            dbg.log("Search", f"更新已有搜索源 '{name}' 的 base_url → {url}")
             return
 
-        # 新搜索源：尝试探测 API 端点
-        # 含 /api 或常见 API 特征的，默认当 API 源处理
+        # 新搜索源：默认当 API 源处理
+        dbg.log("Search", f"新增 API 搜索源 '{name}' → {url}")
         self.sources[name] = {
             "name": name,
             "base_url": url,
@@ -88,7 +87,7 @@ class PanSearch:
             source: 搜索源名称
 
         Returns:
-            dict: {success, results: [{title, url, source}]}
+            dict: {success, results: [{title, url, source, note, ...}]}
         """
         if not keyword or not keyword.strip():
             return {"success": False, "error": "搜索关键词不能为空"}
@@ -101,6 +100,8 @@ class PanSearch:
                 "available_sources": list(self.sources.keys()),
             }
 
+        dbg.log("Search", f"搜索 '{keyword}' via {source} (type={src.get('type', 'html')})")
+
         try:
             src_type = src.get("type", "html")
             if src_type == "api":
@@ -108,22 +109,37 @@ class PanSearch:
             else:
                 return self._search_html(keyword, src, source)
         except requests.Timeout:
+            dbg.log("Search", f"搜索超时: {source}")
             return {"success": False, "error": f"搜索超时 ({source})"}
         except requests.ConnectionError as e:
+            dbg.log("Search", f"连接失败: {source} → {e}")
             return {"success": False, "error": f"无法连接搜索源 ({source}): {e}"}
         except Exception as e:
+            dbg.log("Search", f"搜索异常: {source} → {e}")
             return {"success": False, "error": f"搜索异常: {str(e)}"}
 
     def search_all(self, keyword: str) -> dict:
-        """在所有搜索源中搜索"""
+        """在所有搜索源中搜索，优先自定义源"""
         all_results = []
         errors = []
-        for source_name in self.sources:
+
+        # 排序：自定义源（不在 DEFAULT_SOURCES 中的）优先
+        custom_sources = [k for k in self.sources if k not in self.DEFAULT_SOURCES]
+        default_sources = [k for k in self.sources if k in self.DEFAULT_SOURCES]
+        ordered = custom_sources + default_sources
+
+        dbg.log("Search", f"search_all 搜索顺序: {ordered}")
+
+        for source_name in ordered:
             result = self.search(keyword, source_name)
             if result["success"]:
+                count = len(result.get("results", []))
                 all_results.extend(result.get("results", []))
+                dbg.log("Search", f"  {source_name}: 成功, {count} 条结果")
             else:
-                errors.append(f"{source_name}: {result.get('error')}")
+                err_msg = f"{source_name}: {result.get('error')}"
+                errors.append(err_msg)
+                dbg.log("Search", f"  {source_name}: 失败 → {result.get('error')}")
 
         # 去重（按 URL）
         seen = set()
@@ -132,6 +148,8 @@ class PanSearch:
             if r["url"] not in seen:
                 seen.add(r["url"])
                 unique.append(r)
+
+        dbg.log("Search", f"search_all 汇总: {len(unique)} 条去重结果 (原始 {len(all_results)})")
 
         return {
             "success": True,
@@ -161,9 +179,15 @@ class PanSearch:
             "User-Agent": self.USER_AGENT,
         }
 
+        dbg.log_request("GET", url, params=params)
+        t0 = time.time()
+
         resp = requests.get(url, params=params, headers=headers, timeout=15)
         resp.raise_for_status()
         data = resp.json()
+
+        elapsed_ms = (time.time() - t0) * 1000
+        dbg.log_response(resp.status_code, url, body=data, elapsed_ms=elapsed_ms)
 
         if data.get("code") != 0:
             return {
@@ -182,13 +206,18 @@ class PanSearch:
         for key in result_path.split("."):
             obj = obj.get(key, {}) if isinstance(obj, dict) else {}
 
+        dbg.log("Search", f"API result_path='{result_path}' → 类型={type(obj).__name__}, "
+                f"keys={list(obj.keys()) if isinstance(obj, dict) else len(obj) if isinstance(obj, list) else 'N/A'}")
+
         if isinstance(obj, dict):
             # merged_by_type 格式: {"quark": [...], "baidu": [...], ...}
             for type_name, items in obj.items():
                 if filter_types and type_name not in filter_types:
+                    dbg.log("Search", f"  跳过类型 '{type_name}' ({len(items) if isinstance(items, list) else '?'} 条)")
                     continue
                 if not isinstance(items, list):
                     continue
+                dbg.log("Search", f"  解析类型 '{type_name}': {len(items)} 条")
                 for item in items:
                     url_val = item.get("url", "")
                     note = item.get("note", "").strip()
@@ -201,12 +230,14 @@ class PanSearch:
                             "source": source_name,
                             "type": type_name,
                             "password": password,
+                            "note": note,
                         }
                         if source_tag:
                             entry["upstream"] = source_tag
                         results.append(entry)
         elif isinstance(obj, list):
             # 平铺列表格式
+            dbg.log("Search", f"  解析列表: {len(obj)} 条")
             for item in obj:
                 url_val = item.get("url", "")
                 note = item.get("note", item.get("title", "")).strip()
@@ -216,7 +247,10 @@ class PanSearch:
                         "url": url_val,
                         "source": source_name,
                         "password": item.get("password", ""),
+                        "note": note,
                     })
+
+        dbg.log("Search", f"API 搜索完成: {len(results)} 条结果")
 
         return {
             "success": True,
@@ -241,18 +275,30 @@ class PanSearch:
             "Referer": base_url,
         }
 
-        resp = requests.get(url, headers=headers, timeout=15, allow_redirects=True)
+        timeout = 10 if source_name in self.DEFAULT_SOURCES else 15
+
+        dbg.log_request("GET", url)
+        t0 = time.time()
+
+        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
         resp.raise_for_status()
         html = resp.text
+
+        elapsed_ms = (time.time() - t0) * 1000
+        dbg.log_response(resp.status_code, url,
+                         body=f"(HTML {len(html)} chars)",
+                         elapsed_ms=elapsed_ms)
 
         # 提取链接
         links = re.findall(src.get("link_pattern", ""), html)
         # 提取标题
         titles = re.findall(src.get("title_pattern", ""), html)
 
+        dbg.log("Search", f"HTML 正则提取: {len(links)} 个链接, {len(titles)} 个标题")
+
         if not links:
-            # 尝试通用夸克链接提取
             links = re.findall(r"https?://pan\.quark\.cn/s/[a-zA-Z0-9]+", html)
+            dbg.log("Search", f"通用正则兜底: {len(links)} 个链接")
 
         results = []
         seen = set()
@@ -261,14 +307,16 @@ class PanSearch:
                 continue
             seen.add(link)
             title = titles[i].strip() if i < len(titles) else f"资源 {i + 1}"
-            # 清理 HTML 实体
             title = title.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
             title = re.sub(r"<[^>]+>", "", title)
             results.append({
                 "title": title,
                 "url": link,
                 "source": source_name,
+                "note": title,
             })
+
+        dbg.log("Search", f"HTML 搜索完成: {len(results)} 条结果")
 
         return {
             "success": True,

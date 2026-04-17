@@ -31,10 +31,17 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli task list                              查看任务列表
   quark-cli task add                               添加转存任务
   quark-cli task run                               执行全部任务
+
+调试模式:
+  quark-cli --debug search query "关键词"          启用 debug 输出
         """,
     )
     parser.add_argument("-v", "--version", action="version", version=f"quark-cli {__version__}")
     parser.add_argument("-c", "--config", help="指定配置文件路径", default=None)
+    parser.add_argument(
+        "--debug", action="store_true", default=False,
+        help="启用 debug 模式，打印所有 API 请求/响应详情到 stderr"
+    )
 
     subparsers = parser.add_subparsers(dest="command", help="可用命令")
 
@@ -157,6 +164,12 @@ def main():
     parser = create_parser()
     args = parser.parse_args()
 
+    # 初始化 debug 模式
+    if getattr(args, "debug", False):
+        from quark_cli import debug as dbg
+        dbg.set_debug(True)
+        dbg.log("CLI", f"Debug 模式已启用, args={vars(args)}")
+
     if not args.command:
         parser.print_help()
         return
@@ -183,6 +196,9 @@ def main():
         except Exception as e:
             from quark_cli.display import error
             error(f"执行出错: {e}")
+            if getattr(args, "debug", False):
+                import traceback
+                traceback.print_exc()
             sys.exit(1)
     else:
         parser.print_help()

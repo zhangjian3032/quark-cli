@@ -1,5 +1,5 @@
 """
-search 子命令 - 网盘资源搜索（pansou / funletu 等搜索引擎）
+search 子命令 - 网盘资源搜索（pansou 等搜索引擎）
 """
 
 from quark_cli import display
@@ -21,6 +21,15 @@ def handle(args):
         _search_and_save(args)
     else:
         display.info("用法: quark-cli search {query|sources|set-source|save}")
+
+
+def _truncate(text: str, max_len: int) -> str:
+    """截断文本，超长部分用 ... 替代"""
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 2] + ".."
 
 
 def _query(args):
@@ -59,23 +68,27 @@ def _query(args):
     # 判断是否有密码列
     has_pwd = any(r.get("password") for r in results)
 
+    # 紧凑布局: #(4) + 链接(40) + [密码(8)] + 来源(10) + 说明(剩余)
     if has_pwd:
-        cols = ["#", "标题", "分享链接", "密码", "来源"]
-        widths = [4, 32, 44, 8, 10]
+        cols = ["#", "分享链接", "密码", "来源", "说明"]
+        widths = [4, 40, 8, 10, 38]
     else:
-        cols = ["#", "标题", "分享链接", "来源"]
-        widths = [4, 36, 48, 10]
+        cols = ["#", "分享链接", "来源", "说明"]
+        widths = [4, 40, 10, 46]
 
     display.table_header(cols, widths)
 
     for i, r in enumerate(results):
-        row = [str(i + 1), r["title"], r["url"]]
-        colors = [display.Color.CYAN, display.Color.WHITE, display.Color.GREEN]
+        note = r.get("note") or r.get("title") or ""
+        row = [str(i + 1), r["url"]]
+        colors = [display.Color.CYAN, display.Color.GREEN]
         if has_pwd:
             row.append(r.get("password", ""))
             colors.append(display.Color.YELLOW)
         row.append(r.get("source", ""))
         colors.append(display.Color.DIM)
+        row.append(_truncate(note, widths[-1]))
+        colors.append(display.Color.WHITE)
         display.table_row(row, widths, colors)
 
     print()
@@ -154,9 +167,13 @@ def _search_and_save(args):
 
     # 显示搜索结果
     for i, r in enumerate(results):
+        note = r.get("note") or r.get("title") or ""
         pwd_str = f"  密码: {r['password']}" if r.get("password") else ""
-        print(f"  {display.colorize(str(i + 1), display.Color.CYAN)}. {r['title']}")
-        print(f"     {display.colorize(r['url'], display.Color.DIM)}{display.colorize(pwd_str, display.Color.YELLOW)}")
+        note_str = f"  {_truncate(note, 50)}" if note else ""
+        print(f"  {display.colorize(str(i + 1), display.Color.CYAN)}. "
+              f"{display.colorize(r['url'], display.Color.GREEN)}"
+              f"{display.colorize(pwd_str, display.Color.YELLOW)}"
+              f"{display.colorize(note_str, display.Color.DIM)}")
 
     print()
     try:
@@ -171,7 +188,8 @@ def _search_and_save(args):
         return
 
     selected = results[idx]
-    display.info(f"选择: {selected['title']}")
+    note = selected.get("note") or selected.get("title") or selected["url"]
+    display.info(f"选择: {note}")
     display.info(f"链接: {selected['url']}")
 
     # 先检查链接有效性

@@ -16,7 +16,6 @@ DEFAULT_CONFIG = {
     "push_config": {},
     "search_sources": {
         "pansou": "https://www.pansou.com",
-        "funletu": "https://pan.funletu.com"
     },
     "magic_regex": {
         "$TV": {
