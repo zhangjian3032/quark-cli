@@ -77,7 +77,9 @@ export const searchApi = {
 export const shareApi = {
   check:    (url)                       => request(`/share/check?url=${encodeURIComponent(url)}`),
   list:     (url)                       => request(`/share/list?url=${encodeURIComponent(url)}`),
-  save:     (url, savePath, password)   => post('/share/save', { url, save_path: savePath, password }),
+  subdir:   (url, pdirFid)             => request(`/share/subdir?url=${encodeURIComponent(url)}&pdir_fid=${encodeURIComponent(pdirFid)}`),
+  save:     (url, savePath, password, fidList, fidTokenList)   =>
+    post('/share/save', { url, save_path: savePath, password, fid_list: fidList, fid_token_list: fidTokenList }),
 }
 
 // ── Media (影视) ──

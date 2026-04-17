@@ -106,7 +106,48 @@ class SearchService:
             "items": items,
         }
 
-    def share_save(self, url, save_path, password=""):
+
+    def share_subdir(self, url, pdir_fid):
+        """列出分享链接中某个子目录的内容"""
+        pwd_id, passcode, _, paths = QuarkAPI.extract_share_url(url)
+        if not pwd_id:
+            return {"error": "无法解析分享链接"}
+
+        resp = self._client.get_stoken(pwd_id, passcode)
+        if resp.get("status") != 200:
+            return {"error": "分享链接无效: {}".format(resp.get("message", ""))}
+
+        stoken = resp["data"]["stoken"]
+        detail = self._client.get_share_detail(pwd_id, stoken, pdir_fid)
+        if detail.get("code") != 0:
+            return {"error": "获取目录内容失败: {}".format(detail.get("message", ""))}
+
+        file_list = detail["data"]["list"]
+        items = []
+        total_size = 0
+        for f in file_list:
+            is_dir = bool(f.get("dir"))
+            size = f.get("size", 0)
+            if not is_dir:
+                total_size += size
+            items.append({
+                "fid": f.get("fid", ""),
+                "file_name": f.get("file_name", ""),
+                "size": size,
+                "size_fmt": "<DIR>" if is_dir else QuarkAPI.format_bytes(size),
+                "is_dir": is_dir,
+                "share_fid_token": f.get("share_fid_token", ""),
+            })
+
+        return {
+            "pdir_fid": pdir_fid,
+            "total": len(items),
+            "total_size": total_size,
+            "total_size_fmt": QuarkAPI.format_bytes(total_size),
+            "items": items,
+        }
+
+    def share_save(self, url, save_path, password="", fid_list=None, fid_token_list=None):
         """转存分享链接到指定目录
 
         Returns:
@@ -129,19 +170,26 @@ class SearchService:
             return {"error": "分享链接无效: {}".format(resp.get("message", ""))}
         stoken = resp["data"]["stoken"]
 
-        # 获取文件列表
-        detail = self._client.get_share_detail(pwd_id, stoken, pdir_fid)
-        if detail.get("code") != 0:
-            return {"error": "获取分享文件失败"}
-        file_list = detail["data"]["list"]
-        if not file_list:
-            return {"error": "分享中没有文件"}
+        # 选择性转存: 如果传了 fid_list，直接用选中的文件
+        if fid_list and fid_token_list and len(fid_list) == len(fid_token_list):
+            # 构造虚拟 file_list 用于后续逻辑
+            file_list = []
+            for fid, token in zip(fid_list, fid_token_list):
+                file_list.append({"fid": fid, "share_fid_token": token, "file_name": fid})
+        else:
+            # 获取文件列表
+            detail = self._client.get_share_detail(pwd_id, stoken, pdir_fid)
+            if detail.get("code") != 0:
+                return {"error": "获取分享文件失败"}
+            file_list = detail["data"]["list"]
+            if not file_list:
+                return {"error": "分享中没有文件"}
 
-        # 如果只有一个文件夹，自动进入
-        if len(file_list) == 1 and file_list[0].get("dir"):
-            detail = self._client.get_share_detail(pwd_id, stoken, file_list[0]["fid"])
-            if detail.get("code") == 0:
-                file_list = detail["data"]["list"]
+            # 如果只有一个文件夹，自动进入
+            if len(file_list) == 1 and file_list[0].get("dir"):
+                detail = self._client.get_share_detail(pwd_id, stoken, file_list[0]["fid"])
+                if detail.get("code") == 0:
+                    file_list = detail["data"]["list"]
 
         # 创建/获取目标目录
         save_path_n = re.sub(r"/{2,}", "/", "/{}".format(save_path))

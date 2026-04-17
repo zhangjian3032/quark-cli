@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Search, ExternalLink, Shield, ShieldCheck, ShieldX,
-  Download, Folder, ChevronRight, Home, FolderPlus,
+  Download, Folder, ChevronRight, ChevronDown, Home, FolderPlus,
   File, FileVideo, Loader2, CheckCircle2, XCircle, Link,
   Film, AlertCircle, Sparkles, ArrowRight, Eye,
-  FolderOpen, FileText, Zap, Tag,
+  FolderOpen, FileText, Zap, Tag, Check, Square, CheckSquare,
 } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { searchApi, shareApi, driveApi, mediaApi, discoveryApi } from '../api/client'
@@ -293,7 +293,17 @@ function SavedPreview({ path }) {
 }
 
 /* ════════════════════════════════════════════════
-   分享预览面板 (增强版)
+   工具函数: 格式化字节
+   ════════════════════════════════════════════════ */
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0) + ' ' + units[i]
+}
+
+/* ════════════════════════════════════════════════
+   分享预览面板 (增强版 — 支持目录展开 + 选择性转存)
    ════════════════════════════════════════════════ */
 function SharePreview({ url, keyword, suggestedPath, onSaved }) {
   const [data, setData] = useState(null)
@@ -303,21 +313,147 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
   const [saving, setSaving] = useState(false)
   const [saveResult, setSaveResult] = useState(null)
 
+  // 目录展开状态: { [fid]: { loading, items, expanded } }
+  const [dirState, setDirState] = useState({})
+  // 选中文件: Set of "fid::token"
+  const [selected, setSelected] = useState(new Set())
+  // 全选模式 (默认全选)
+  const [selectAll, setSelectAll] = useState(true)
+
   useEffect(() => {
     setLoading(true)
     setError(null)
     setSaveResult(null)
+    setDirState({})
+    setSelected(new Set())
+    setSelectAll(true)
     shareApi.list(url)
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }, [url])
 
+  /* ── 目录展开/折叠 ── */
+  const toggleDir = async (item) => {
+    const fid = item.fid
+    const cur = dirState[fid]
+
+    // 已展开 → 折叠
+    if (cur?.expanded) {
+      setDirState(s => ({ ...s, [fid]: { ...s[fid], expanded: false } }))
+      return
+    }
+
+    // 已加载 → 展开
+    if (cur?.items) {
+      setDirState(s => ({ ...s, [fid]: { ...s[fid], expanded: true } }))
+      return
+    }
+
+    // 首次加载
+    setDirState(s => ({ ...s, [fid]: { loading: true, items: null, expanded: true } }))
+    try {
+      const result = await shareApi.subdir(url, fid)
+      setDirState(s => ({
+        ...s,
+        [fid]: { loading: false, items: result.items || [], expanded: true },
+      }))
+    } catch {
+      setDirState(s => ({
+        ...s,
+        [fid]: { loading: false, items: [], expanded: true, error: true },
+      }))
+    }
+  }
+
+  /* ── 选择/取消选择 ── */
+  const toggleSelect = (fid, token) => {
+    const key = `${fid}::${token}`
+    setSelectAll(false)
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      // 全选 → 取消全部
+      setSelectAll(false)
+      setSelected(new Set())
+    } else {
+      // 恢复全选
+      setSelectAll(true)
+      setSelected(new Set())
+    }
+  }
+
+  /* ── 递归收集所有文件 (含子目录已展开的) ── */
+  const getAllFiles = useCallback(() => {
+    const files = []
+    const collect = (items) => {
+      for (const item of items) {
+        if (item.is_dir) {
+          const sub = dirState[item.fid]
+          if (sub?.items) collect(sub.items)
+        } else {
+          files.push(item)
+        }
+      }
+    }
+    if (data?.items) collect(data.items)
+    return files
+  }, [data, dirState])
+
+  /* ── 计算选中文件信息 ── */
+  const selectionInfo = useMemo(() => {
+    if (selectAll) {
+      // 全选 = 用 data 原始统计 (包含未展开的子目录)
+      const allFiles = getAllFiles()
+      const knownSize = allFiles.reduce((s, f) => s + (f.size || 0), 0)
+      // 如果有未展开的目录，大小可能不完整，用原始 total_size
+      const totalSize = data?.total_size || knownSize
+      return {
+        count: data?.total || allFiles.length,
+        size: totalSize,
+        sizeFmt: formatBytes(totalSize),
+        hasUnexpanded: (data?.items || []).some(i => i.is_dir && !dirState[i.fid]?.items),
+      }
+    }
+    // 部分选择
+    let count = 0, size = 0
+    const allFiles = getAllFiles()
+    for (const f of allFiles) {
+      const key = `${f.fid}::${f.share_fid_token}`
+      if (selected.has(key)) {
+        count++
+        size += f.size || 0
+      }
+    }
+    return { count, size, sizeFmt: formatBytes(size), hasUnexpanded: false }
+  }, [selectAll, selected, data, dirState, getAllFiles])
+
+  /* ── 转存 ── */
   const doSave = async (savePath) => {
     setShowPicker(false)
     setSaving(true)
     setSaveResult(null)
     try {
-      const result = await shareApi.save(url, savePath)
+      let fidList, fidTokenList
+
+      if (!selectAll && selected.size > 0) {
+        // 选择性转存
+        fidList = []
+        fidTokenList = []
+        for (const key of selected) {
+          const [fid, token] = key.split('::')
+          fidList.push(fid)
+          fidTokenList.push(token)
+        }
+      }
+
+      const result = await shareApi.save(url, savePath, '', fidList, fidTokenList)
       setSaveResult(result)
       if (onSaved) onSaved(result)
     } catch (e) {
@@ -335,12 +471,99 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
     }
   }
 
+  /* ── 渲染文件行 (递归) ── */
+  const renderFileRow = (item, depth = 0) => {
+    const isDir = item.is_dir
+    const ds = dirState[item.fid]
+    const isExpanded = ds?.expanded
+    const isLoading = ds?.loading
+
+    const isVideo = /\.(mp4|mkv|avi|rmvb|ts|flv|wmv)$/i.test(item.file_name)
+    const key = `${item.fid}::${item.share_fid_token}`
+    const isChecked = selectAll || selected.has(key)
+
+    return (
+      <div key={item.fid}>
+        <div
+          className="flex items-center gap-2 px-4 py-2 text-sm
+                     border-b border-white/[0.03] hover:bg-surface-2 transition-colors"
+          style={{ paddingLeft: `${16 + depth * 20}px` }}
+        >
+          {/* Checkbox (仅文件) */}
+          {!isDir ? (
+            <button
+              onClick={() => toggleSelect(item.fid, item.share_fid_token)}
+              className="flex-shrink-0 text-gray-500 hover:text-brand-400 transition-colors"
+            >
+              {isChecked
+                ? <CheckSquare size={15} className="text-brand-400" />
+                : <Square size={15} />
+              }
+            </button>
+          ) : (
+            <span className="w-[15px] flex-shrink-0" />
+          )}
+
+          {/* Icon + expand button for dirs */}
+          {isDir ? (
+            <button
+              onClick={() => toggleDir(item)}
+              className="flex items-center gap-1 flex-shrink-0 text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              {isLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : isExpanded ? (
+                <ChevronDown size={14} />
+              ) : (
+                <ChevronRight size={14} />
+              )}
+              {isExpanded ? <FolderOpen size={16} /> : <Folder size={16} />}
+            </button>
+          ) : (
+            isVideo
+              ? <FileVideo size={16} className="text-purple-400 flex-shrink-0" />
+              : <File size={16} className="text-gray-500 flex-shrink-0" />
+          )}
+
+          {/* File name */}
+          <span
+            className={`truncate flex-1 ${isDir ? 'text-brand-300 cursor-pointer hover:text-brand-200' : 'text-gray-200'}`}
+            title={item.file_name}
+            onClick={isDir ? () => toggleDir(item) : undefined}
+          >
+            {item.file_name}
+          </span>
+
+          {/* Size */}
+          <span className="text-xs text-gray-600 flex-shrink-0">
+            {isDir ? (ds?.items ? `${ds.items.length} 项` : '') : item.size_fmt}
+          </span>
+        </div>
+
+        {/* Expanded children */}
+        {isDir && isExpanded && ds?.items && (
+          ds.items.map(child => renderFileRow(child, depth + 1))
+        )}
+        {isDir && isExpanded && ds?.error && (
+          <div className="text-xs text-red-400 py-2"
+               style={{ paddingLeft: `${36 + depth * 20}px` }}>
+            加载失败
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  /* ── Render ── */
+
   if (loading) return (
     <div className="card p-6 flex items-center justify-center gap-2 text-gray-500">
       <Loader2 size={18} className="animate-spin" /> 加载分享内容...
     </div>
   )
   if (error) return <ErrorBanner message={error} />
+
+  const canSave = selectAll || selected.size > 0
 
   return (
     <div className="card overflow-hidden">
@@ -351,12 +574,11 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
           <span className="text-sm text-gray-300 truncate">{url}</span>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <span className="text-xs text-gray-500">{data?.total} 个文件 · {data?.total_size_fmt}</span>
           {/* 一键转存 */}
           {suggestedPath && (
             <button
               onClick={handleQuickSave}
-              disabled={saving}
+              disabled={saving || !canSave}
               className="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5
                          bg-green-600 hover:bg-green-500 text-white disabled:bg-surface-3 disabled:text-gray-600"
             >
@@ -367,7 +589,7 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
           {/* 手动选择目录 */}
           <button
             onClick={() => setShowPicker(true)}
-            disabled={saving}
+            disabled={saving || !canSave}
             className="btn-primary text-sm flex items-center gap-1.5"
           >
             {saving && !suggestedPath ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
@@ -384,23 +606,35 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
         </div>
       )}
 
-      {/* File list */}
-      <div className="max-h-[300px] overflow-y-auto">
-        {data?.items?.map((item, i) => (
-          <div key={i} className="flex items-center gap-2.5 px-4 py-2 text-sm
-                                   border-b border-white/[0.03] hover:bg-surface-2">
-            {item.is_dir
-              ? <Folder size={16} className="text-brand-400 flex-shrink-0" />
-              : /\.(mp4|mkv|avi|rmvb|ts|flv|wmv)$/i.test(item.file_name)
-                ? <FileVideo size={16} className="text-purple-400 flex-shrink-0" />
-                : <File size={16} className="text-gray-500 flex-shrink-0" />
-            }
-            <span className="text-gray-200 truncate flex-1" title={item.file_name}>
-              {item.file_name}
-            </span>
-            <span className="text-xs text-gray-600 flex-shrink-0">{item.size_fmt}</span>
-          </div>
-        ))}
+      {/* Selection bar */}
+      <div className="px-4 py-2 border-b border-white/5 flex items-center justify-between bg-surface-1/50">
+        <button
+          onClick={handleSelectAll}
+          className="flex items-center gap-2 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+        >
+          {selectAll
+            ? <CheckSquare size={14} className="text-brand-400" />
+            : <Square size={14} />
+          }
+          {selectAll ? '全选' : '全选'}
+        </button>
+        <div className="flex items-center gap-3 text-xs text-gray-500">
+          <span>
+            已选 <span className="text-gray-300 font-medium">{selectAll ? (data?.total || '全部') : selectionInfo.count}</span> 个文件
+          </span>
+          <span className="text-gray-600">·</span>
+          <span>
+            大小 <span className="text-gray-300 font-medium">{selectionInfo.sizeFmt}</span>
+            {selectionInfo.hasUnexpanded && (
+              <span className="text-gray-600 ml-1" title="展开目录后显示精确大小">≈</span>
+            )}
+          </span>
+        </div>
+      </div>
+
+      {/* File list with tree */}
+      <div className="max-h-[400px] overflow-y-auto">
+        {data?.items?.map(item => renderFileRow(item, 0))}
       </div>
 
       {/* Save result */}
