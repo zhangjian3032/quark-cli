@@ -8,6 +8,7 @@ import MetaPage from './pages/MetaPage'
 import DrivePage from './pages/DrivePage'
 import ResourceSearchPage from './pages/ResourceSearchPage'
 import ConfigPage from './pages/ConfigPage'
+import TmdbDetailPage from './pages/TmdbDetailPage'
 
 const NAV_SECTIONS = [
   {
@@ -97,6 +98,7 @@ export default function App() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/detail/:guid" element={<DetailPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
+            <Route path="/discover/:tmdbId" element={<TmdbDetailPage />} />
             <Route path="/meta" element={<MetaPage />} />
             <Route path="/drive" element={<DrivePage />} />
             <Route path="/resource-search" element={<ResourceSearchPage />} />

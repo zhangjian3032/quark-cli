@@ -1,9 +1,14 @@
 import { useState } from 'react'
-import { Search, Copy, FolderOpen, ExternalLink } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {
+  Search, Copy, FolderOpen, ExternalLink, ArrowRight,
+  Star, Calendar, Clock, Film, Tv, Tag, Zap, Download,
+} from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import { PageSpinner, EmptyState, PageHeader, ErrorBanner } from '../components/UI'
 
 export default function MetaPage() {
+  const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [mediaType, setMediaType] = useState('movie')
   const [data, setData] = useState(null)
@@ -24,7 +29,17 @@ export default function MetaPage() {
     navigator.clipboard.writeText(text).catch(() => {})
   }
 
+  /** 跳转到搜索转存页 */
+  const goSearch = (keyword, savePath) => {
+    const params = new URLSearchParams({ keyword })
+    if (savePath) params.set('path', savePath)
+    navigate(`/resource-search?${params.toString()}`)
+  }
+
   const meta = data?.meta
+  const keywords = data?.search_keywords || []
+  const paths = data?.save_paths || []
+  const defaultPath = paths[0]?.path || ''
 
   return (
     <>
@@ -72,16 +87,46 @@ export default function MetaPage() {
                 )}
                 {meta.tagline && <p className="text-gray-500 italic mt-1">"{meta.tagline}"</p>}
 
-                <div className="flex flex-wrap gap-3 mt-4">
-                  <span className="badge-yellow">★ {meta.rating} ({meta.vote_count} 票)</span>
-                  <span className="badge-blue">{meta.year}</span>
-                  {meta.runtime > 0 && <span className="badge-blue">{meta.runtime} 分钟</span>}
-                  {meta.genres?.map((g, i) => <span key={i} className="badge-green">{g}</span>)}
+                <div className="flex flex-wrap gap-2 mt-4">
+                  {meta.rating > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium
+                                     bg-amber-500/15 text-amber-400 border border-amber-500/20">
+                      <Star size={12} className="fill-amber-400" /> {meta.rating} ({meta.vote_count})
+                    </span>
+                  )}
+                  {meta.year && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs
+                                     bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                      <Calendar size={12} /> {meta.year}
+                    </span>
+                  )}
+                  {meta.runtime > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs
+                                     bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                      <Clock size={12} /> {meta.runtime} 分钟
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs
+                                   bg-purple-500/15 text-purple-400 border border-purple-500/20">
+                    {data.media_type === 'tv' ? <Tv size={12} /> : <Film size={12} />}
+                    {data.media_type === 'tv' ? '剧集' : '电影'}
+                  </span>
+                  {meta.genres?.map((g, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs
+                                             bg-green-500/15 text-green-400 border border-green-500/20">
+                      <Tag size={10} /> {g}
+                    </span>
+                  ))}
                 </div>
 
                 <div className="flex gap-4 mt-3 text-xs text-gray-500">
                   <span>TMDB: {meta.tmdb_id}</span>
-                  {meta.imdb_id && <span>IMDb: {meta.imdb_id}</span>}
+                  {meta.imdb_id && (
+                    <a href={`https://www.imdb.com/title/${meta.imdb_id}/`} target="_blank" rel="noreferrer"
+                      className="hover:text-gray-300 flex items-center gap-1">
+                      IMDb: {meta.imdb_id} <ExternalLink size={10} />
+                    </a>
+                  )}
                   {meta.status && <span>状态: {meta.status}</span>}
                 </div>
 
@@ -104,22 +149,30 @@ export default function MetaPage() {
             </div>
           </div>
 
-          {/* Search keywords */}
-          {data.search_keywords?.length > 0 && (
+          {/* Search keywords — with search+save jump */}
+          {keywords.length > 0 && (
             <div className="card p-5">
               <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
                 <Search size={18} /> 搜索关键词建议
               </h3>
               <div className="space-y-2">
-                {data.search_keywords.map((kw, i) => (
-                  <div key={i} className="flex items-center justify-between bg-surface-2 rounded-lg px-4 py-2.5">
-                    <code className="text-sm text-brand-300">{kw}</code>
+                {keywords.map((kw, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-surface-2 rounded-lg px-4 py-2.5">
+                    <code className="text-sm text-brand-300 flex-1">{kw}</code>
                     <button
                       onClick={() => copyText(kw)}
                       className="btn-ghost p-1.5 text-gray-500 hover:text-white"
                       title="复制"
                     >
                       <Copy size={14} />
+                    </button>
+                    <button
+                      onClick={() => goSearch(kw, defaultPath)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium
+                                 bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 transition-colors"
+                      title="跳转搜索转存"
+                    >
+                      <Download size={12} /> 搜索转存
                     </button>
                   </div>
                 ))}
@@ -128,24 +181,31 @@ export default function MetaPage() {
           )}
 
           {/* Save paths */}
-          {data.save_paths?.length > 0 && (
+          {paths.length > 0 && (
             <div className="card p-5">
               <h3 className="font-semibold text-white mb-3 flex items-center gap-2">
                 <FolderOpen size={18} /> 保存路径建议
               </h3>
               <div className="space-y-2">
-                {data.save_paths.map((p, i) => (
-                  <div key={i} className="flex items-center justify-between bg-surface-2 rounded-lg px-4 py-2.5">
-                    <div>
-                      <code className="text-sm text-emerald-300">{p.path}</code>
-                      <span className="text-xs text-gray-500 ml-2">{p.description}</span>
-                    </div>
+                {paths.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-surface-2 rounded-lg px-4 py-2.5">
+                    <FolderOpen size={14} className="text-green-400 flex-shrink-0" />
+                    <code className="text-sm text-emerald-300 truncate flex-1">{p.path}</code>
+                    <span className="text-xs text-gray-500 flex-shrink-0">{p.description}</span>
                     <button
                       onClick={() => copyText(p.path)}
                       className="btn-ghost p-1.5 text-gray-500 hover:text-white"
                       title="复制"
                     >
                       <Copy size={14} />
+                    </button>
+                    <button
+                      onClick={() => goSearch(keywords[0] || query, p.path)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium
+                                 bg-green-600/20 text-green-400 hover:bg-green-600/30 transition-colors"
+                      title="使用此路径搜索转存"
+                    >
+                      <Zap size={12} /> 转存到此
                     </button>
                   </div>
                 ))}
@@ -159,13 +219,16 @@ export default function MetaPage() {
               <h3 className="font-semibold text-white mb-3">其他匹配</h3>
               <div className="space-y-1">
                 {data.other_results.map((r, i) => (
-                  <div key={i} className="flex items-center justify-between text-sm py-1.5">
+                  <button key={i}
+                    onClick={() => navigate(`/discover/${r.tmdb_id}?type=${data.media_type}`)}
+                    className="w-full flex items-center justify-between text-sm py-2 px-2
+                               rounded hover:bg-surface-2 transition-colors text-left">
                     <span className="text-gray-300">{r.title} ({r.year})</span>
                     <div className="flex items-center gap-3">
-                      <span className="text-xs text-gray-500">★ {r.rating}</span>
-                      <span className="text-xs text-gray-600">TMDB:{r.tmdb_id}</span>
+                      <span className="text-xs text-amber-400">★ {r.rating}</span>
+                      <ArrowRight size={12} className="text-gray-600" />
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>

@@ -6,6 +6,7 @@ import {
   Film, AlertCircle, Sparkles, ArrowRight, Eye,
   FolderOpen, FileText, Zap, Tag,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { searchApi, shareApi, driveApi, mediaApi, discoveryApi } from '../api/client'
 import { PageHeader, PageSpinner, EmptyState, ErrorBanner } from '../components/UI'
 
@@ -435,6 +436,7 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
    主页面
    ════════════════════════════════════════════════ */
 export default function ResourceSearchPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [keyword, setKeyword] = useState('')
   const [searchedKeyword, setSearchedKeyword] = useState('')
   const [results, setResults] = useState(null)
@@ -447,20 +449,42 @@ export default function ResourceSearchPage() {
   const [checkResult, setCheckResult] = useState(null)
   const [checking, setChecking] = useState(false)
 
-  // TMDB 推荐路径（全局，可被 MetaHint 和 SharePreview 使用）
+  // TMDB 推荐路径
   const [suggestedPath, setSuggestedPath] = useState(null)
+
+  // 自动搜索标记
+  const [autoSearchDone, setAutoSearchDone] = useState(false)
+
+  const doSearch = useCallback((kw) => {
+    if (!kw.trim()) return
+    setLoading(true)
+    setError(null)
+    setPreviewUrl(null)
+    setSearchedKeyword(kw.trim())
+    searchApi.query(kw.trim())
+      .then(d => { setResults(d); setLoading(false) })
+      .catch(e => { setError(e.message); setLoading(false) })
+  }, [])
+
+  // 从 URL 参数读取 keyword 和 path，自动触发搜索
+  useEffect(() => {
+    if (autoSearchDone) return
+    const urlKw = searchParams.get('keyword')
+    const urlPath = searchParams.get('path')
+    if (urlKw) {
+      setKeyword(urlKw)
+      if (urlPath) setSuggestedPath(urlPath)
+      doSearch(urlKw)
+      setAutoSearchDone(true)
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, autoSearchDone, doSearch, setSearchParams])
 
   const handleSearch = (e) => {
     e.preventDefault()
     if (!keyword.trim()) return
-    setLoading(true)
-    setError(null)
-    setPreviewUrl(null)
     setSuggestedPath(null)
-    setSearchedKeyword(keyword.trim())
-    searchApi.query(keyword.trim())
-      .then(d => { setResults(d); setLoading(false) })
-      .catch(e => { setError(e.message); setLoading(false) })
+    doSearch(keyword.trim())
   }
 
   const handleCheckUrl = async (e) => {
@@ -525,7 +549,6 @@ export default function ResourceSearchPage() {
               {checking ? '检查中...' : '检查'}
             </button>
           </div>
-          {/* Check result badge */}
           {checkResult && (
             <div className={`flex items-center gap-1.5 mt-2 text-xs
               ${checkResult.valid ? 'text-green-400' : 'text-red-400'}`}>
@@ -538,7 +561,7 @@ export default function ResourceSearchPage() {
         </form>
       </div>
 
-      {/* 智能提示区 (搜索后显示) */}
+      {/* 智能提示区 */}
       {searchedKeyword && !loading && (
         <>
           <MediaLibHint keyword={searchedKeyword} />
@@ -546,7 +569,7 @@ export default function ResourceSearchPage() {
         </>
       )}
 
-      {/* 已选择的推荐路径指示 */}
+      {/* 已选择的推荐路径 */}
       {suggestedPath && (
         <div className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-green-500/8 border border-green-500/20">
           <Zap size={14} className="text-green-400 flex-shrink-0" />
@@ -620,7 +643,6 @@ export default function ResourceSearchPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      {/* 一键转存按钮 (有推荐路径时显示) */}
                       {suggestedPath && (
                         <button
                           onClick={(e) => {

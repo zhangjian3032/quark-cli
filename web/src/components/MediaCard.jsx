@@ -1,5 +1,11 @@
 /**
- * 通用媒体卡片 — 用于媒体库和搜索结果展示
+ * 通用媒体卡片 — 用于媒体库、搜索结果、TMDB 发现
+ *
+ * Props:
+ *   item         - 影片对象 (guid/tmdb_id, title, year, rating, media_type, genres, poster_url)
+ *   posterUrl    - 海报图片 URL (优先于 item.poster_url)
+ *   showType     - 是否显示 电影/剧集 标签
+ *   tmdbMode     - true 时点击跳 /discover/:tmdb_id, false 跳 /detail/:guid
  */
 import { useNavigate } from 'react-router-dom'
 import { Star, Calendar, Film, Tv } from 'lucide-react'
@@ -21,15 +27,24 @@ function formatRating(r) {
   return typeof r === 'number' ? r.toFixed(1) : String(r)
 }
 
-export default function MediaCard({ item, posterUrl, showType = false }) {
+export default function MediaCard({ item, posterUrl, showType = false, tmdbMode = false }) {
   const navigate = useNavigate()
   const [imgError, setImgError] = useState(false)
   const ratingStr = formatRating(item.rating)
 
+  const handleClick = () => {
+    if (tmdbMode) {
+      const type = item.media_type || 'movie'
+      navigate(`/discover/${item.tmdb_id}?type=${type}`)
+    } else {
+      navigate(`/detail/${item.guid}`)
+    }
+  }
+
   return (
     <div
       className="card-hover cursor-pointer overflow-hidden group"
-      onClick={() => navigate(`/detail/${item.guid || item.tmdb_id}`)}
+      onClick={handleClick}
     >
       {/* Poster */}
       <div className="aspect-[2/3] overflow-hidden relative">

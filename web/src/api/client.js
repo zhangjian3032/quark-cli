@@ -107,6 +107,7 @@ export const discoveryApi = {
       ...(params.genre ? { genre: params.genre } : {}),
       ...(params.year ? { year: String(params.year) } : {}),
       ...(params.country ? { country: params.country } : {}),
+      ...(params.sortBy ? { sort_by: params.sortBy } : {}),
     })
     return request(`/discovery/list?${qs}`)
   },
