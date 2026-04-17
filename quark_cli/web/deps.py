@@ -19,6 +19,27 @@ def get_config():
     return ConfigManager(config_path=_config_path)
 
 
+# ── 夸克网盘 ──
+
+def get_quark_client():
+    """创建 QuarkAPI 客户端"""
+    from quark_cli.api import QuarkAPI
+    cfg = get_config()
+    cookies = cfg.get_cookies()
+    if not cookies:
+        raise ValueError("未配置 Cookie，请先执行: quark-cli config set-cookie <cookie>")
+    return QuarkAPI(cookies[0])
+
+
+def get_drive_service():
+    """创建 DriveService"""
+    from quark_cli.services.drive_service import DriveService
+    client = get_quark_client()
+    return DriveService(client)
+
+
+# ── 影视媒体中心 ──
+
 def get_media_provider():
     """创建 Media Provider 实例"""
     from quark_cli.media.registry import create_provider
@@ -43,6 +64,8 @@ def get_media_service():
     provider = get_media_provider()
     return MediaService(provider)
 
+
+# ── TMDB 发现 ──
 
 def get_tmdb_source():
     """创建 TMDB 数据源"""

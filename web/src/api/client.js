@@ -10,7 +10,26 @@ async function request(path, opts = {}) {
   return res.json()
 }
 
-// ── Media ──
+function post(path, data) {
+  return request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+// ── Drive (网盘) ──
+export const driveApi = {
+  ls:       (path = '/')                => request(`/drive/ls?path=${encodeURIComponent(path)}`),
+  mkdir:    (path)                      => post('/drive/mkdir', { path }),
+  rename:   (fid, newName)              => post('/drive/rename', { fid, new_name: newName }),
+  delete:   (fids)                      => post('/drive/delete', { fids }),
+  download: (fid)                       => request(`/drive/download?fid=${encodeURIComponent(fid)}`),
+  search:   (keyword, path = '/')       => request(`/drive/search?keyword=${encodeURIComponent(keyword)}&path=${encodeURIComponent(path)}`),
+  space:    ()                          => request('/drive/space'),
+}
+
+// ── Media (影视) ──
 export const mediaApi = {
   status:      ()                      => request('/media/status'),
   libraries:   ()                      => request('/media/libraries'),

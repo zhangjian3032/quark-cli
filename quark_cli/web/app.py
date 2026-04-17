@@ -37,9 +37,10 @@ def create_app(config_path=None):
     app.state.config_path = config_path
 
     # 注册 API 路由
-    from quark_cli.web.routes import media, discovery
+    from quark_cli.web.routes import media, discovery, drive
     app.include_router(media.router, prefix="/api")
     app.include_router(discovery.router, prefix="/api")
+    app.include_router(drive.router, prefix="/api")
 
     # 健康检查
     @app.get("/api/health")
