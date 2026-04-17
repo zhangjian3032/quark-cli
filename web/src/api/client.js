@@ -92,6 +92,19 @@ export const renameApi = {
   preview:  (url, pattern, replace)     => post('/rename/preview', { url, pattern, replace }),
 }
 
+// ── Scheduler (定时任务) ──
+export const schedulerApi = {
+  status:   ()             => request('/scheduler/status'),
+  tasks:    ()             => request('/scheduler/tasks'),
+  create:   (task)         => post('/scheduler/tasks', task),
+  update:   (index, task)  => put(`/scheduler/tasks/${index}`, task),
+  remove:   (index)        => del_(`/scheduler/tasks/${index}`, {}),
+  toggle:   (index)        => post(`/scheduler/tasks/${index}/toggle`, {}),
+  trigger:  (index)        => post(`/scheduler/tasks/${index}/trigger`, {}),
+  start:    ()             => post('/scheduler/start', {}),
+  stop:     ()             => post('/scheduler/stop', {}),
+}
+
 // ── Media (影视) ──
 export const mediaApi = {
   status:      ()                      => request('/media/status'),

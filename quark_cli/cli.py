@@ -353,6 +353,18 @@ def _try_start_bot(config_path):
     kvline("  基准路径", base_path)
 
 
+def _try_start_scheduler(config_path):
+    """尝试启动定时任务调度器，无任务则跳过"""
+    from quark_cli.display import info
+    try:
+        from quark_cli.scheduler import try_start_scheduler
+        scheduler = try_start_scheduler(config_path)
+        if scheduler:
+            info("定时任务调度器: 已启动")
+    except Exception as e:
+        info("定时任务调度器: 启动失败 - {}".format(e))
+
+
 def _serve(args):
     """启动 FastAPI Web 服务"""
     try:
@@ -385,6 +397,10 @@ def _serve(args):
     # 尝试在后台启动飞书机器人
     if not reload:
         _try_start_bot(config_path)
+
+    # 尝试启动定时任务调度器
+    if not reload:
+        _try_start_scheduler(config_path)
 
     # 自动打开浏览器
     if not no_open and not reload:
