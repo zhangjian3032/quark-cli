@@ -87,15 +87,15 @@ class MediaService:
         return {"files": saved, "guid": guid}
 
     def get_poster_url(self, guid):
-        """获取海报 URL (不下载, 用于 Web 展示)"""
+        """获取海报代理 URL (不下载, 用于 Web 展示)"""
         raw = self._provider._client.get_item_detail(guid)
         posters_path = raw.get("posters", "") or ""
         backdrops_path = raw.get("backdrops", "") or ""
         result = {"guid": guid}
         if posters_path:
-            result["poster_url"] = self._provider._client.get_image_url(posters_path)
+            result["poster_url"] = "/api/media/img/{}".format(posters_path.lstrip("/"))
         if backdrops_path:
-            result["backdrop_url"] = self._provider._client.get_image_url(backdrops_path)
+            result["backdrop_url"] = "/api/media/img/{}".format(backdrops_path.lstrip("/"))
         return result
 
     # ── 播放记录 ──
@@ -134,14 +134,24 @@ class MediaService:
 
     # ── 工具方法 ──
 
-    @staticmethod
-    def _item_dict(item):
+    def _poster_proxy_url(self, poster_path):
+        """将 fnOS 的 poster 相对路径转为后端代理 URL (/api/media/img/...)"""
+        if not poster_path:
+            return ""
+        return "/api/media/img/{}".format(poster_path.lstrip("/"))
+
+    def _item_dict(self, item):
+        rating = item.rating
+        if isinstance(rating, float):
+            rating = round(rating, 1)
+
         return {
             "guid": item.guid,
             "title": item.title,
             "year": item.year or "",
-            "rating": item.rating,
+            "rating": rating,
             "media_type": item.media_type or "",
             "original_title": getattr(item, "original_title", ""),
             "overview": getattr(item, "overview", ""),
+            "poster_url": self._poster_proxy_url(getattr(item, "poster_url", "")),
         }

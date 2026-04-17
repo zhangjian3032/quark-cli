@@ -15,9 +15,16 @@ function PosterPlaceholder({ title }) {
   )
 }
 
+/** 格式化评分：保留 1 位小数 */
+function formatRating(r) {
+  if (r == null || r <= 0) return null
+  return typeof r === 'number' ? r.toFixed(1) : String(r)
+}
+
 export default function MediaCard({ item, posterUrl, showType = false }) {
   const navigate = useNavigate()
   const [imgError, setImgError] = useState(false)
+  const ratingStr = formatRating(item.rating)
 
   return (
     <div
@@ -39,11 +46,11 @@ export default function MediaCard({ item, posterUrl, showType = false }) {
           <PosterPlaceholder title={item.title} />
         )}
         {/* Rating badge */}
-        {item.rating > 0 && (
+        {ratingStr && (
           <div className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1
                           bg-black/70 backdrop-blur-sm rounded-md text-xs">
             <Star size={12} className="text-amber-400 fill-amber-400" />
-            <span className="text-amber-200 font-medium">{item.rating}</span>
+            <span className="text-amber-200 font-medium">{ratingStr}</span>
           </div>
         )}
       </div>

@@ -4,6 +4,12 @@ import { ArrowLeft, Star, Calendar, Clock, Users, Film } from 'lucide-react'
 import { mediaApi } from '../api/client'
 import { PageSpinner, ErrorBanner } from '../components/UI'
 
+/** 格式化评分：保留 1 位小数 */
+function formatRating(r) {
+  if (r == null || r <= 0) return null
+  return typeof r === 'number' ? r.toFixed(1) : String(r)
+}
+
 export default function DetailPage() {
   const { guid } = useParams()
   const navigate = useNavigate()
@@ -30,6 +36,12 @@ export default function DetailPage() {
   if (error) return <ErrorBanner message={error} />
   if (!detail) return null
 
+  const ratingStr = formatRating(detail.rating)
+
+  // poster_url 优先来自 detail 本身（已内联），fallback 到单独 poster 接口
+  const posterSrc = detail.poster_url || poster?.poster_url || ''
+  const backdropSrc = poster?.backdrop_url || ''
+
   return (
     <>
       <button
@@ -43,10 +55,10 @@ export default function DetailPage() {
       <div className="card overflow-hidden">
         <div className="relative">
           {/* Backdrop */}
-          {poster?.backdrop_url && (
+          {backdropSrc && (
             <div className="h-[300px] overflow-hidden">
               <img
-                src={poster.backdrop_url}
+                src={backdropSrc}
                 alt=""
                 className="w-full h-full object-cover opacity-40"
               />
@@ -55,11 +67,11 @@ export default function DetailPage() {
           )}
 
           {/* Content overlay */}
-          <div className={`${poster?.backdrop_url ? 'absolute bottom-0 left-0 right-0' : ''} p-6 flex gap-6`}>
+          <div className={`${backdropSrc ? 'absolute bottom-0 left-0 right-0' : ''} p-6 flex gap-6`}>
             {/* Poster */}
-            {poster?.poster_url && (
+            {posterSrc && (
               <img
-                src={poster.poster_url}
+                src={posterSrc}
                 alt={detail.title}
                 className="w-[180px] rounded-lg shadow-2xl flex-shrink-0 hidden sm:block"
               />
@@ -73,10 +85,10 @@ export default function DetailPage() {
               )}
 
               <div className="flex flex-wrap items-center gap-4 mt-4">
-                {detail.rating > 0 && (
+                {ratingStr && (
                   <div className="flex items-center gap-1.5">
                     <Star size={18} className="text-amber-400 fill-amber-400" />
-                    <span className="text-lg font-semibold text-amber-200">{detail.rating}</span>
+                    <span className="text-lg font-semibold text-amber-200">{ratingStr}</span>
                   </div>
                 )}
                 {detail.year && (

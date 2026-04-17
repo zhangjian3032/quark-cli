@@ -1,6 +1,7 @@
 """影视媒体中心 API 路由"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import Response
 
 router = APIRouter(tags=["media"])
 
@@ -80,6 +81,36 @@ def media_item_poster_url(guid: str):
         return svc.get_poster_url(guid)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/media/img/{img_path:path}")
+def media_image_proxy(img_path: str):
+    """
+    图片代理端点 — 后端带认证向 fnOS 获取图片，转发给前端。
+    前端使用: /api/media/img/{poster_path}
+    避免前端直接请求 fnOS 时的跨域 / 认证问题。
+    """
+    from quark_cli.web.deps import get_media_provider
+
+    if not img_path:
+        raise HTTPException(status_code=400, detail="缺少图片路径")
+
+    try:
+        provider = get_media_provider()
+        content, content_type = provider._client.fetch_image(img_path)
+        if not content:
+            raise HTTPException(status_code=404, detail="图片为空")
+        return Response(
+            content=content,
+            media_type=content_type,
+            headers={
+                "Cache-Control": "public, max-age=86400",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail="获取图片失败: {}".format(str(e)))
 
 
 @router.get("/media/playing")

@@ -234,15 +234,59 @@ class FnosClient:
         path = image_path.lstrip("/")
         return "{}/{}".format(self._config.img_base, path)
 
-    def download_image(self, url, output_path=""):
-        # type: (str, str) -> bytes
-        """下载图片，支持保存到文件"""
-        from pathlib import Path
+    def _image_auth_headers(self, image_path):
+        # type: (str) -> Dict[str, str]
+        """为图片请求生成认证 header (authx + Authorization)"""
+        sign_path = "/v/api/v1/sys/img/{}".format(image_path.lstrip("/"))
+        return self._auth.get_auth_headers(
+            method="GET", url_path=sign_path, params=None, data=None,
+        )
+
+    def fetch_image(self, image_path):
+        # type: (str) -> tuple
+        """
+        带认证获取图片二进制内容。
+        返回 (content_bytes, content_type)
+        """
+        if not image_path:
+            return b"", ""
+        url = self.get_image_url(image_path)
+        headers = self._image_auth_headers(image_path)
 
         dbg.log_request("GET", url)
         t0 = time.time()
 
-        resp = self._session.get(url, allow_redirects=True)
+        resp = self._session.get(url, headers=headers, allow_redirects=True)
+        elapsed_ms = (time.time() - t0) * 1000
+
+        dbg.log_response(
+            resp.status_code, url,
+            body="<binary {} bytes>".format(len(resp.content)),
+            elapsed_ms=elapsed_ms,
+        )
+        resp.raise_for_status()
+
+        content_type = resp.headers.get("Content-Type", "image/jpeg")
+        return resp.content, content_type
+
+    def download_image(self, url, output_path=""):
+        # type: (str, str) -> bytes
+        """下载图片，支持保存到文件。自动带认证 header。"""
+        from pathlib import Path
+
+        # 从完整 URL 中提取图片路径用于签名
+        img_base = self._config.img_base
+        if url.startswith(img_base):
+            relative_path = url[len(img_base):]
+            headers = self._image_auth_headers(relative_path)
+        else:
+            # fallback: 仍然尝试带 token
+            headers = {"Authorization": self._auth.token} if self._auth.token else {}
+
+        dbg.log_request("GET", url)
+        t0 = time.time()
+
+        resp = self._session.get(url, headers=headers, allow_redirects=True)
         elapsed_ms = (time.time() - t0) * 1000
 
         dbg.log_response(resp.status_code, url, body="<binary {} bytes>".format(len(resp.content)), elapsed_ms=elapsed_ms)

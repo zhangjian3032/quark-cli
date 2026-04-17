@@ -9,3 +9,5 @@ build/
 .venv/
 venv/
 env/
+web/node_modules/
+web/package-lock.json
