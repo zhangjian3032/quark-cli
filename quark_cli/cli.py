@@ -38,6 +38,7 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli media info <GUID>                      查看影片详情
   quark-cli media meta "流浪地球2"                 查询 TMDB 元数据
   quark-cli media discover --list top_rated        高分影视推荐
+  quark-cli media auto-save "流浪地球2"            自动搜索+转存
 
 调试模式:
   quark-cli --debug search query "关键词"          启用 debug 输出
@@ -254,6 +255,26 @@ def create_parser() -> argparse.ArgumentParser:
     md.add_argument("--min-votes", type=int, default=50, help="最低票数 (默认 50)")
     md.add_argument("--window", default="week", choices=["day", "week"],
                      help="趋势时间窗口 (仅 trending 有效, 默认 week)")
+
+    # media auto-save  (自动搜索转存)
+    mas = media_sub.add_parser("auto-save", help="自动搜索+转存 (一键全流程)")
+    mas.add_argument("name", help="影视名称 (如 '流浪地球2')")
+    mas.add_argument("--save-path", help="保存路径 (不指定则通过 TMDB 自动生成)")
+    mas.add_argument("--no-tmdb", action="store_true", default=False,
+                      help="跳过 TMDB 元数据查询，直接用名称搜索")
+    mas.add_argument("-t", "--type", default="movie", choices=["movie", "tv"],
+                      help="类型 (默认 movie, 仅 TMDB 模式有效)")
+    mas.add_argument("-y", "--year", type=int, help="年份 (可选, 缩小搜索范围)")
+    mas.add_argument("--pattern", default=".*", help="正则过滤文件名 (默认 .*)")
+    mas.add_argument("--replace", default="", help="正则替换文件名")
+    mas.add_argument("--max-attempts", type=int, default=10,
+                      help="最大尝试链接数 (默认 10)")
+    mas.add_argument("--base-path", default="/媒体",
+                      help="保存路径基准目录 (默认 /媒体)")
+    mas.add_argument("--keyword", action="append",
+                      help="手动指定搜索关键词 (可多次使用, 覆盖自动生成)")
+    mas.add_argument("--dry-run", action="store_true", default=False,
+                      help="仅搜索和排序，不实际转存")
 
     return parser
 

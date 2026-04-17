@@ -903,6 +903,247 @@ def _handle_discover(args):
 # 入口
 # ──────────────────────────────────────────────
 
+
+# ──────────────────────────────────────────────
+# media auto-save (自动搜索转存)
+# ──────────────────────────────────────────────
+
+def _handle_auto_save(args):
+    """media auto-save - 自动搜索+排序+转存 全流程"""
+    from quark_cli.commands.helpers import get_client, get_config
+    from quark_cli.search import PanSearch
+    from quark_cli.media.autosave import auto_save_pipeline, rank_results, filter_quark_links
+
+    name = args.name
+    save_path = getattr(args, "save_path", None)
+    no_tmdb = getattr(args, "no_tmdb", False)
+    media_type = getattr(args, "type", "movie") or "movie"
+    year = getattr(args, "year", None)
+    pattern = getattr(args, "pattern", ".*") or ".*"
+    replace = getattr(args, "replace", "") or ""
+    max_attempts = getattr(args, "max_attempts", 10) or 10
+    base_path = getattr(args, "base_path", "/媒体") or "/媒体"
+    manual_keywords = getattr(args, "keyword", None)
+    dry_run = getattr(args, "dry_run", False)
+
+    # ── Step 1: 生成搜索关键词和保存路径 ──
+    keywords = []
+    tmdb_item = None
+
+    if manual_keywords:
+        keywords = list(manual_keywords)
+        if not is_json_mode():
+            info("使用手动关键词: {}".format(", ".join(keywords)))
+    elif no_tmdb:
+        keywords = [name]
+        if year:
+            keywords.append("{} {}".format(name, year))
+    else:
+        # 尝试 TMDB 元数据
+        try:
+            from quark_cli.media.discovery.tmdb import TmdbError
+            from quark_cli.media.discovery.naming import suggest_search_keywords, suggest_save_path
+
+            source = _get_tmdb_source(args)
+
+            if not is_json_mode():
+                info("正在查询 TMDB 元数据: {}".format(name))
+
+            result = source.search(name, media_type=media_type, page=1, year=year)
+            # fallback
+            if not result.items:
+                alt = "tv" if media_type == "movie" else "movie"
+                result = source.search(name, media_type=alt, page=1, year=year)
+                if result.items:
+                    media_type = alt
+
+            if result.items:
+                first = result.items[0]
+                tmdb_item = source.get_detail(first.source_id, media_type)
+                # resolve genres
+                if tmdb_item.genres and isinstance(tmdb_item.genres[0], int):
+                    try:
+                        tmdb_item.genres = source.resolve_genre_names(tmdb_item.genres, media_type)
+                    except Exception:
+                        pass
+
+                keywords = suggest_search_keywords(tmdb_item)
+                if not save_path:
+                    paths = suggest_save_path(tmdb_item, base_path=base_path)
+                    if paths:
+                        save_path = paths[0]["path"]
+
+                if not is_json_mode():
+                    success("TMDB 匹配: {} ({}) ★{}".format(
+                        tmdb_item.title, tmdb_item.year, tmdb_item.rating
+                    ))
+            else:
+                if not is_json_mode():
+                    warning("TMDB 未找到匹配，使用原始名称搜索")
+        except Exception as e:
+            if not is_json_mode():
+                warning("TMDB 查询跳过: {}".format(e))
+
+        # fallback: 直接用名字
+        if not keywords:
+            keywords = [name]
+            if year:
+                keywords.append("{} {}".format(name, year))
+
+    # 保存路径 fallback
+    if not save_path:
+        type_folder = "电影" if media_type == "movie" else "剧集"
+        title_folder = "{} ({})".format(name, year) if year else name
+        save_path = "/{}/{}/{}".format(base_path.strip("/"), type_folder, title_folder)
+
+    if not is_json_mode():
+        header("\U0001f680 自动搜索转存")
+        kvline("名称", name)
+        kvline("关键词", " | ".join(keywords))
+        kvline("保存路径", save_path)
+        kvline("最大尝试", str(max_attempts))
+        if pattern != ".*":
+            kvline("文件过滤", pattern)
+        if dry_run:
+            kvline("模式", colorize("DRY RUN (仅搜索排序)", Color.YELLOW))
+        print()
+
+    # ── Step 2: 搜索 ──
+    cfg = get_config(args)
+    search_engine = PanSearch(config=cfg)
+
+    if not is_json_mode():
+        info("正在搜索网盘资源...")
+
+    all_results = []
+    for kw in keywords:
+        result = search_engine.search_all(kw)
+        if result.get("success") and result.get("results"):
+            all_results.extend(result["results"])
+
+    # 去重
+    seen_urls = set()
+    unique = []
+    for r in all_results:
+        u = r.get("url", "")
+        if u not in seen_urls:
+            seen_urls.add(u)
+            unique.append(r)
+
+    quark_results = filter_quark_links(unique)
+
+    if not quark_results:
+        if is_json_mode():
+            json_out({"success": False, "error": "未搜索到夸克网盘链接", "keywords": keywords})
+        else:
+            error("未搜索到夸克网盘链接")
+        sys.exit(1)
+
+    ranked = rank_results(quark_results, keywords)
+    candidates = ranked[:max_attempts]
+
+    if not is_json_mode():
+        success("找到 {} 个夸克链接 (共搜到 {})".format(len(quark_results), len(unique)))
+        print()
+        subheader("\U0001f3af 候选排名 (Top {})".format(len(candidates)))
+        cols = ["#", "评分", "名称", "大小", "画质"]
+        widths = [4, 6, 40, 8, 8]
+        table_header(cols, widths)
+        for i, c in enumerate(candidates, start=1):
+            sd = c.get("score_detail", {})
+            size_str = "{:.1f}G".format(sd.get("size_gb", 0)) if sd.get("size_gb") else "?"
+            quality = str(sd.get("quality", 0))
+            table_row(
+                [str(i), str(c.get("score", 0)), c.get("title", "")[:38], size_str, quality],
+                widths,
+                colors=[Color.DIM, Color.YELLOW, Color.CYAN, Color.GREEN, Color.MAGENTA],
+            )
+        print()
+
+    # ── Dry run: 到此为止 ──
+    if dry_run:
+        if is_json_mode():
+            json_out({
+                "dry_run": True,
+                "keywords": keywords,
+                "save_path": save_path,
+                "candidates": [
+                    {
+                        "title": c.get("title", ""),
+                        "url": c.get("url", ""),
+                        "score": c.get("score", 0),
+                        "score_detail": c.get("score_detail", {}),
+                    }
+                    for c in candidates
+                ],
+            })
+        else:
+            info("DRY RUN 完成，未执行转存")
+        return
+
+    # ── Step 3: 逐个尝试转存 ──
+    quark_client = get_client(args)
+    account_info = quark_client.init()
+    if not account_info:
+        error("夸克账号验证失败，请检查 Cookie")
+        sys.exit(1)
+
+    if not is_json_mode():
+        info("夸克账号: {}".format(quark_client.nickname))
+        info("开始逐个尝试链接...")
+        print()
+
+    def on_progress(event, data):
+        if is_json_mode():
+            return
+        if event == "try_start":
+            info("[{}/{}] 尝试: {} (评分 {})".format(
+                data.get("index", "?"), len(candidates),
+                data.get("title", "")[:50], data.get("score", 0)
+            ))
+        elif event == "try_fail":
+            warning("  ✗ 失败: {}".format(data.get("error", "未知")))
+        elif event == "save_success":
+            success("  ✔ 转存成功! {} 个文件".format(data.get("saved_count", 0)))
+
+    pipeline_result = auto_save_pipeline(
+        quark_client=quark_client,
+        search_engine=search_engine,
+        keywords=keywords,
+        save_path=save_path,
+        pattern=pattern,
+        replace=replace,
+        max_attempts=max_attempts,
+        on_progress=on_progress,
+    )
+
+    if is_json_mode():
+        if tmdb_item:
+            pipeline_result["tmdb"] = {
+                "id": tmdb_item.source_id,
+                "title": tmdb_item.title,
+                "year": tmdb_item.year,
+                "rating": tmdb_item.rating,
+            }
+        json_out(pipeline_result)
+        return
+
+    print()
+    if pipeline_result["success"]:
+        header("\u2705 转存完成!")
+        kvline("来源", pipeline_result.get("saved_from_title", ""))
+        kvline("链接", pipeline_result.get("saved_from", ""))
+        kvline("文件数", str(pipeline_result.get("saved_count", 0)))
+        kvline("保存到", pipeline_result.get("save_path", ""))
+        kvline("尝试次数", "{}/{}".format(pipeline_result.get("attempts", 0), len(candidates)))
+    else:
+        error("转存失败: {}".format(pipeline_result.get("error", "")))
+        if pipeline_result.get("errors"):
+            subheader("失败详情")
+            for err in pipeline_result["errors"]:
+                print("  ✗ {} → {}".format(err.get("title", "")[:40], err.get("error", "")))
+
+
 def handle(args):
     """media 命令分发"""
     action = getattr(args, "media_action", None)
@@ -938,8 +1179,10 @@ def handle(args):
         _handle_meta(args)
     elif action == "discover":
         _handle_discover(args)
+    elif action == "auto-save":
+        _handle_auto_save(args)
     else:
-        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover}")
+        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|auto-save}")
         print()
         print("  影视媒体中心管理 (支持 fnOS / Emby / Jellyfin / TMDB)")
         print()
@@ -955,3 +1198,4 @@ def handle(args):
         print("    playing   查看继续观看列表")
         print("    meta      查询影视元数据 (TMDB)")
         print("    discover  高分影视推荐 (TMDB)")
+        print("    auto-save 自动搜索+转存 (一键全流程)")
