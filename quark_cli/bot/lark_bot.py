@@ -282,6 +282,9 @@ def run_auto_save(config_path, name, media_type="movie", year=None, dry_run=Fals
         save_path=save_path,
         max_attempts=10,
         on_progress=on_progress,
+        media_title=result.get('title', ''),
+        media_year=result.get('year'),
+        media_type=result.get('media_type', 'movie'),
     )
 
     result["attempts"] = pipeline_result.get("attempts", 0)

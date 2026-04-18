@@ -1115,6 +1115,9 @@ def _handle_auto_save(args):
         replace=replace,
         max_attempts=max_attempts,
         on_progress=on_progress,
+        media_title=tmdb_item.title if tmdb_item else '',
+        media_year=tmdb_item.year if tmdb_item else None,
+        media_type=media_type if media_type else 'movie',
     )
 
     if is_json_mode():

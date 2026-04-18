@@ -4,7 +4,7 @@ media auto-save 自动搜索转存引擎
 流程:
   1. 名称 → (可选) TMDB 元数据查询 → 生成搜索关键词和保存路径
   2. 搜索网盘资源 → 找到夸克链接 → 智能排序 (名称匹配度/大小/画质)
-  3. 逐个检查链接有效性 → 转存到目标路径 (最大尝试 N 个)
+  3. 逐个检查链接有效性 → 智能选择最佳文件 → 转存 + 规范重命名
 """
 
 import re
@@ -68,7 +68,6 @@ _SUB_BONUS = {
 
 def _extract_size_gb(title):
     """从标题中提取文件大小 (GB), 未找到返回 0"""
-    # 匹配 "12.5G", "2.3GB", "800M", "800MB" 等
     m = re.search(r"(\d+(?:\.\d+)?)\s*(GB|G|TB|T)\b", title, re.IGNORECASE)
     if m:
         val = float(m.group(1))
@@ -92,14 +91,11 @@ def _calc_name_match_score(title, keywords):
     for kw in keywords:
         kw_lower = kw.lower()
         if kw_lower in title_lower:
-            # 完全包含: 基础 60 分
             score = 60
-            # 越短的标题匹配到 → 相关性越高
             ratio = len(kw) / max(len(title), 1)
             score += int(ratio * 40)
             best_score = max(best_score, score)
         else:
-            # 逐词匹配
             kw_parts = re.split(r"[\s\-_\.]+", kw_lower)
             matched = sum(1 for p in kw_parts if p and p in title_lower)
             if kw_parts:
@@ -139,16 +135,7 @@ def _calc_sub_bonus(title):
 
 
 def score_resource(result, keywords):
-    """
-    对单个搜索结果进行综合评分。
-
-    Args:
-        result: dict with 'title', 'url', etc.
-        keywords: list[str] 搜索关键词列表
-
-    Returns:
-        dict: result 原字典附加 'score', 'score_detail' 字段
-    """
+    """对单个搜索结果进行综合评分。"""
     title = result.get("title", "") or result.get("note", "")
 
     name_score = _calc_name_match_score(title, keywords)
@@ -157,21 +144,19 @@ def score_resource(result, keywords):
     codec_bonus = _calc_codec_bonus(title)
     sub_bonus = _calc_sub_bonus(title)
 
-    # 大小评分: 4~80GB 最佳，越大画质越好（大概率）
     if size_gb >= 80:
-        size_score = 70  # 合集或超大，可能不是单片
+        size_score = 70
     elif size_gb >= 20:
-        size_score = 90  # remux 级
+        size_score = 90
     elif size_gb >= 8:
-        size_score = 80  # 高清
+        size_score = 80
     elif size_gb >= 2:
-        size_score = 50  # 标清
+        size_score = 50
     elif size_gb > 0:
-        size_score = 20  # 过小，质量差
+        size_score = 20
     else:
-        size_score = 30  # 未知大小
+        size_score = 30
 
-    # 综合: 名称匹配 40% + 画质 25% + 大小 15% + 编码 10% + 字幕 10%
     total = (
         name_score * 0.40
         + quality_score * 0.25
@@ -193,12 +178,7 @@ def score_resource(result, keywords):
 
 
 def rank_results(results, keywords):
-    """
-    对搜索结果列表进行评分排序。
-
-    Returns:
-        list: 按 score 降序排列的结果列表
-    """
+    """对搜索结果列表进行评分排序。"""
     for r in results:
         score_resource(r, keywords)
     return sorted(results, key=lambda x: x.get("score", 0), reverse=True)
@@ -228,31 +208,29 @@ def auto_save_pipeline(
     replace="",
     max_attempts=10,
     on_progress=None,
+    media_title="",
+    media_year=None,
+    media_type="movie",
 ):
     """
-    自动搜索 + 排序 + 校验 + 转存 流水线。
+    自动搜索 + 排序 + 校验 + 智能选择 + 转存 + 重命名 流水线。
 
     Args:
         quark_client:  QuarkAPI 实例 (已登录)
         search_engine: PanSearch 实例
         keywords:      list[str] 搜索关键词列表
-        save_path:     str 保存路径 (如 /媒体/电影/科幻/流浪地球2 (2023))
-        pattern:       str 正则过滤文件名
-        replace:       str 正则替换文件名
+        save_path:     str 保存路径
+        pattern:       str 正则过滤文件名 (兼容旧逻辑)
+        replace:       str 正则替换文件名 (兼容旧逻辑)
         max_attempts:  int 最大尝试链接数
         on_progress:   callable(event, data) 进度回调
+        media_title:   str TMDB 标准标题, 用于智能重命名 (空=不重命名)
+        media_year:    int 年份
+        media_type:    str "movie" 或 "tv"
 
     Returns:
-        dict: {
-            "success": bool,
-            "saved_from": str,          # 成功转存的来源链接
-            "saved_count": int,         # 转存文件数
-            "saved_fids": list,         # 新文件 fid 列表
-            "save_path": str,           # 保存路径
-            "attempts": int,            # 尝试了多少个链接
-            "candidates": list,         # 所有候选 (含 score)
-            "errors": list,             # 各候选的失败原因
-        }
+        dict with success, saved_from, saved_count, saved_fids, save_path,
+        attempts, renamed, candidates, errors
     """
     def emit(event, data=None):
         if on_progress:
@@ -295,7 +273,7 @@ def auto_save_pipeline(
     candidates = ranked[:max_attempts]
     emit("rank_done", {"candidates": len(candidates), "top_score": candidates[0].get("score", 0)})
 
-    # ─ Step 3: 逐个尝试 check + save ─
+    # ─ Step 3: 逐个尝试 ─
     errors = []
     for idx, candidate in enumerate(candidates):
         url = candidate["url"]
@@ -306,13 +284,20 @@ def auto_save_pipeline(
         dbg.log("AutoSave", "[{}/{}] 尝试: {} (score={})".format(idx + 1, len(candidates), url, score))
 
         try:
-            result = _try_save_one(quark_client, url, save_path, pattern, replace)
+            result = _try_save_one(
+                quark_client, url, save_path,
+                pattern=pattern, replace=replace,
+                media_title=media_title,
+                media_year=media_year,
+                media_type=media_type,
+            )
             if result["success"]:
                 emit("save_success", {
                     "index": idx + 1,
                     "url": url,
                     "title": title,
                     "saved_count": result["saved_count"],
+                    "renamed": result.get("renamed", []),
                 })
                 return {
                     "success": True,
@@ -323,6 +308,7 @@ def auto_save_pipeline(
                     "saved_fids": result["saved_fids"],
                     "save_path": save_path,
                     "attempts": idx + 1,
+                    "renamed": result.get("renamed", []),
                     "candidates": [
                         {"title": c.get("title", ""), "url": c.get("url", ""), "score": c.get("score", 0)}
                         for c in candidates
@@ -352,34 +338,44 @@ def auto_save_pipeline(
     }
 
 
-def _try_save_one(quark_client, share_url, save_path, pattern=".*", replace=""):
+def _try_save_one(
+    quark_client, share_url, save_path,
+    pattern=".*", replace="",
+    media_title="", media_year=None, media_type="movie",
+):
     """
     尝试从一个分享链接转存。
 
+    智能选择逻辑 (当 media_title 非空时):
+      - 电影: 只选最大的视频文件，重命名为规范格式
+      - 剧集: 选所有识别到集数的文件，按集数排序重命名
+
     Returns:
-        dict: {"success": bool, "saved_count": int, "saved_fids": list, "error": str}
+        dict: {"success": bool, "saved_count": int, "saved_fids": list,
+               "renamed": list, "error": str}
     """
     from quark_cli.api import QuarkAPI
     import re as _re
 
+    _empty = {"success": False, "saved_count": 0, "saved_fids": [], "renamed": []}
+
     pwd_id, passcode, pdir_fid, paths = QuarkAPI.extract_share_url(share_url)
     if not pwd_id:
-        return {"success": False, "error": "无法解析链接", "saved_count": 0, "saved_fids": []}
+        return dict(_empty, error="无法解析链接")
 
     # check 有效性
     resp = quark_client.get_stoken(pwd_id, passcode)
     if resp.get("status") != 200:
-        msg = resp.get("message", "链接失效")
-        return {"success": False, "error": msg, "saved_count": 0, "saved_fids": []}
+        return dict(_empty, error=resp.get("message", "链接失效"))
 
     stoken = resp["data"]["stoken"]
     detail = quark_client.get_share_detail(pwd_id, stoken, pdir_fid)
     if detail.get("code") != 0:
-        return {"success": False, "error": detail.get("message", "获取详情失败"), "saved_count": 0, "saved_fids": []}
+        return dict(_empty, error=detail.get("message", "获取详情失败"))
 
     file_list = detail["data"]["list"]
     if not file_list:
-        return {"success": False, "error": "分享中无文件", "saved_count": 0, "saved_fids": []}
+        return dict(_empty, error="分享中无文件")
 
     # 若只有一个文件夹，自动进入
     if len(file_list) == 1 and file_list[0].get("dir"):
@@ -387,10 +383,45 @@ def _try_save_one(quark_client, share_url, save_path, pattern=".*", replace=""):
         if sub.get("code") == 0 and sub["data"]["list"]:
             file_list = sub["data"]["list"]
 
-    # 正则过滤
-    filtered = [f for f in file_list if _re.search(pattern, f.get("file_name", ""))]
-    if not filtered:
-        return {"success": False, "error": "无匹配文件 (pattern={})".format(pattern), "saved_count": 0, "saved_fids": []}
+    # ── 智能选择 (如果提供了 media_title) ──
+    use_smart = bool(media_title)
+    rename_plan = []  # [(原始文件名, 新文件名)]
+
+    if use_smart:
+        try:
+            from quark_cli.media.parser import select_best_files, generate_rename, parse_filename
+
+            selected = select_best_files(file_list, media_type=media_type)
+            if not selected:
+                dbg.log("AutoSave", "智能选择未找到合适文件, 回退到正则模式")
+                use_smart = False
+            else:
+                for f in selected:
+                    parsed = f.get("parsed") or parse_filename(
+                        f.get("file_name", ""), f.get("size", 0)
+                    )
+                    new_name = generate_rename(
+                        parsed,
+                        title=media_title,
+                        year=media_year,
+                        media_type=media_type,
+                    )
+                    rename_plan.append((f.get("file_name", ""), new_name))
+                    dbg.log("AutoSave", "选择: {} ({:.1f}MB) → {}".format(
+                        f.get("file_name", ""),
+                        f.get("size", 0) / 1048576,
+                        new_name,
+                    ))
+                filtered = selected
+        except ImportError:
+            dbg.log("AutoSave", "media.parser 不可用, 回退到正则模式")
+            use_smart = False
+
+    if not use_smart:
+        # 旧逻辑: 正则过滤
+        filtered = [f for f in file_list if _re.search(pattern, f.get("file_name", ""))]
+        if not filtered:
+            return dict(_empty, error="无匹配文件 (pattern={})".format(pattern))
 
     # 确保保存目录存在
     save_path_norm = _re.sub(r"/{2,}", "/", "/{}".format(save_path))
@@ -400,19 +431,29 @@ def _try_save_one(quark_client, share_url, save_path, pattern=".*", replace=""):
     else:
         mkdir_resp = quark_client.mkdir(save_path_norm)
         if mkdir_resp.get("code") != 0:
-            return {"success": False, "error": "创建目录失败: {}".format(mkdir_resp.get("message")), "saved_count": 0, "saved_fids": []}
+            return dict(_empty, error="创建目录失败: {}".format(mkdir_resp.get("message")))
         to_pdir_fid = mkdir_resp["data"]["fid"]
 
-    # 检查已存在的文件
+    # 检查已存在的文件 (原始名和新名都检查)
     dir_resp = quark_client.ls_dir(to_pdir_fid)
     existing = set()
     if dir_resp.get("code") == 0:
         existing = {f["file_name"] for f in dir_resp["data"]["list"]}
 
-    to_save = [f for f in filtered if f.get("file_name", "") not in existing]
+    new_names_map = dict(rename_plan) if rename_plan else {}
+
+    to_save = []
+    for f in filtered:
+        orig_name = f.get("file_name", "")
+        if orig_name in existing:
+            continue
+        new_name = new_names_map.get(orig_name)
+        if new_name and new_name in existing:
+            continue
+        to_save.append(f)
+
     if not to_save:
-        # 全部已存在也算成功
-        return {"success": True, "saved_count": 0, "saved_fids": [], "note": "文件已存在"}
+        return {"success": True, "saved_count": 0, "saved_fids": [], "renamed": [], "note": "文件已存在"}
 
     # 批量转存
     all_fids = []
@@ -422,20 +463,43 @@ def _try_save_one(quark_client, share_url, save_path, pattern=".*", replace=""):
         token_list = [f["share_fid_token"] for f in batch]
         save_resp = quark_client.save_file(fid_list, token_list, to_pdir_fid, pwd_id, stoken)
         if save_resp.get("code") != 0:
-            return {"success": False, "error": "转存失败: {}".format(save_resp.get("message")), "saved_count": 0, "saved_fids": []}
+            return dict(_empty, error="转存失败: {}".format(save_resp.get("message")))
         task_id = save_resp["data"]["task_id"]
         task_resp = quark_client.query_task(task_id)
         if task_resp.get("code") != 0 or task_resp.get("data", {}).get("status") != 2:
-            return {"success": False, "error": "转存任务异常", "saved_count": 0, "saved_fids": []}
+            return dict(_empty, error="转存任务异常")
         new_fids = task_resp["data"]["save_as"]["save_as_top_fids"]
         all_fids.extend(new_fids)
 
-    # 重命名 (可选)
-    if replace:
+    # ── 重命名 ──
+    renamed_results = []
+
+    if use_smart and rename_plan:
+        for idx, f in enumerate(to_save):
+            if idx < len(all_fids):
+                orig_name = f.get("file_name", "")
+                new_name = new_names_map.get(orig_name)
+                if new_name and new_name != orig_name:
+                    try:
+                        quark_client.rename(all_fids[idx], new_name)
+                        renamed_results.append({"from": orig_name, "to": new_name})
+                        dbg.log("AutoSave", "重命名: {} → {}".format(orig_name, new_name))
+                    except Exception as e:
+                        dbg.log("AutoSave", "重命名失败: {} — {}".format(new_name, e))
+    elif replace:
         for idx, f in enumerate(to_save):
             if idx < len(all_fids):
                 new_name = _re.sub(pattern, replace, f["file_name"])
                 if new_name != f["file_name"]:
-                    quark_client.rename(all_fids[idx], new_name)
+                    try:
+                        quark_client.rename(all_fids[idx], new_name)
+                        renamed_results.append({"from": f["file_name"], "to": new_name})
+                    except Exception:
+                        pass
 
-    return {"success": True, "saved_count": len(all_fids), "saved_fids": all_fids}
+    return {
+        "success": True,
+        "saved_count": len(all_fids),
+        "saved_fids": all_fids,
+        "renamed": renamed_results,
+    }

@@ -297,6 +297,9 @@ def run_discover_task(task_config, config_path=None):
                 keywords=keywords,
                 save_path=save_path,
                 max_attempts=5,
+                media_title=title,
+                media_year=int(year) if year else None,
+                media_type=media_type,
             )
 
             if save_result.get("success"):
