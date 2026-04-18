@@ -97,7 +97,7 @@ export default function HistoryPage() {
       </div>
 
       {/* 筛选器 */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
         <Filter className="w-4 h-4 text-gray-500" />
         <select value={filterType} onChange={e => setFilterType(e.target.value)}
           className="bg-surface-2 border border-surface-3 rounded-lg px-3 py-1.5 text-sm outline-none">
@@ -125,7 +125,7 @@ export default function HistoryPage() {
           <div key={rec.id}>
             <button
               onClick={() => setExpanded(expanded === rec.id ? null : rec.id)}
-              className="w-full px-5 py-3 flex items-center gap-3 hover:bg-surface-2/50 transition text-left"
+              className="w-full px-3 sm:px-5 py-2.5 sm:py-3 flex items-center gap-2 sm:gap-3 hover:bg-surface-2/50 transition text-left"
             >
               {statusIcon[rec.status] || statusIcon.success}
               <div className="min-w-0 flex-1">
@@ -145,7 +145,7 @@ export default function HistoryPage() {
                 expanded === rec.id ? 'rotate-180' : ''}`} />
             </button>
             {expanded === rec.id && (
-              <div className="px-5 pb-3">
+              <div className="px-3 sm:px-5 pb-3">
                 <div className="bg-surface-2 rounded-lg p-3 text-xs font-mono text-gray-400 max-h-60 overflow-auto">
                   <div className="text-gray-600 mb-1">时间: {rec.ts}</div>
                   <pre className="whitespace-pre-wrap break-all">

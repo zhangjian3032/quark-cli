@@ -46,10 +46,10 @@ function StatCard({ icon: Icon, iconColor, label, value, sub, to }) {
   const props = to ? { to } : {}
   return (
     <Wrap {...props}
-      className={`bg-surface-1 rounded-xl p-4 border border-surface-3 flex items-start gap-3
+      className={`bg-surface-1 rounded-xl p-3 sm:p-4 border border-surface-3 flex items-start gap-2 sm:gap-3
         ${to ? 'hover:border-brand-500/40 transition cursor-pointer' : ''}`}>
-      <div className={`p-2 rounded-lg bg-surface-2 ${iconColor || 'text-brand-400'}`}>
-        <Icon className="w-5 h-5" />
+      <div className={`p-1.5 sm:p-2 rounded-lg bg-surface-2 shrink-0 ${iconColor || 'text-brand-400'}`}>
+        <Icon className="w-4 h-4 sm:w-5 sm:h-5" />
       </div>
       <div className="min-w-0">
         <div className="text-xs text-gray-500">{label}</div>
@@ -129,7 +129,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 顶部统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
         <StatCard icon={User} label="账号"
           value={acct.nickname || (acct.error ? '未连接' : '—')}
           sub={acct.vip_type || ''}
@@ -250,7 +250,7 @@ export default function DashboardPage() {
             <div className="px-5 py-8 text-center text-sm text-gray-600">暂无执行记录</div>
           )}
           {(hist.recent || []).map((rec, i) => (
-            <div key={rec.id || i} className="px-5 py-3 flex items-center gap-3 hover:bg-surface-2/50 transition">
+            <div key={rec.id || i} className="px-3 sm:px-5 py-2.5 sm:py-3 flex items-center gap-2 sm:gap-3 hover:bg-surface-2/50 transition">
               {statusIcon[rec.status] || statusIcon.success}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

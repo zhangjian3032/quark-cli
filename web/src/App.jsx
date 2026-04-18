@@ -1,5 +1,6 @@
-import { Routes, Route, NavLink } from 'react-router-dom'
-import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History, Menu, X } from 'lucide-react'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
 import LibraryPage from './pages/LibraryPage'
@@ -46,68 +47,113 @@ const NAV_SECTIONS = [
   },
 ]
 
-function Sidebar() {
-  return (
-    <aside className="fixed left-0 top-0 bottom-0 w-[220px] bg-surface-1 border-r border-surface-3
-                       flex flex-col z-30">
-      {/* Logo */}
-      <div className="h-16 flex items-center gap-3 px-5 border-b border-surface-3">
-        <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center font-bold text-sm">
-          Q
-        </div>
-        <div>
-          <div className="font-semibold text-sm text-white">Quark CLI</div>
-          <div className="text-[10px] text-gray-500">Dashboard</div>
-        </div>
-      </div>
+function Sidebar({ open, onClose }) {
+  const location = useLocation()
 
-      {/* Nav */}
-      <nav className="flex-1 py-4 px-3 overflow-y-auto">
-        {NAV_SECTIONS.map(section => (
-          <div key={section.title} className="mb-4">
-            <div className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-600">
-              {section.title}
+  // 路由变化时自动关闭移动端菜单
+  useEffect(() => {
+    onClose()
+  }, [location.pathname]) // eslint-disable-line
+
+  return (
+    <>
+      {/* 移动端遮罩 */}
+      {open && (
+        <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={onClose} />
+      )}
+
+      <aside className={`
+        fixed left-0 top-0 bottom-0 w-[220px] bg-surface-1 border-r border-surface-3
+        flex flex-col z-50
+        transition-transform duration-200 ease-in-out
+        ${open ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0
+      `}>
+        {/* Logo + 移动端关闭按钮 */}
+        <div className="h-14 flex items-center justify-between px-4 border-b border-surface-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center font-bold text-sm">
+              Q
             </div>
-            <div className="space-y-0.5">
-              {section.items.map(({ to, icon: Icon, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={to === '/'}
-                  className={({ isActive }) =>
-                    `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors
-                    ${isActive
-                      ? 'bg-brand-600/15 text-brand-400'
-                      : 'text-gray-400 hover:text-white hover:bg-surface-2'
-                    }`
-                  }
-                >
-                  <Icon size={18} />
-                  {label}
-                </NavLink>
-              ))}
+            <div>
+              <div className="font-semibold text-sm text-white">Quark CLI</div>
+              <div className="text-[10px] text-gray-500">Dashboard</div>
             </div>
           </div>
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div className="px-5 py-3 border-t border-surface-3">
-        <div className="flex items-center gap-2 text-[10px] text-gray-600">
-          <Activity size={12} />
-          <span>v2.4.0</span>
+          <button onClick={onClose} className="p-1 rounded hover:bg-surface-3 lg:hidden">
+            <X className="w-5 h-5 text-gray-400" />
+          </button>
         </div>
+
+        {/* Nav */}
+        <nav className="flex-1 py-3 px-2.5 overflow-y-auto">
+          {NAV_SECTIONS.map(section => (
+            <div key={section.title} className="mb-3">
+              <div className="px-3 mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-600">
+                {section.title}
+              </div>
+              <div className="space-y-0.5">
+                {section.items.map(({ to, icon: Icon, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    end={to === '/'}
+                    className={({ isActive }) =>
+                      `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                      ${isActive
+                        ? 'bg-brand-600/15 text-brand-400'
+                        : 'text-gray-400 hover:text-white hover:bg-surface-2'
+                      }`
+                    }
+                  >
+                    <Icon size={18} />
+                    {label}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="px-4 py-2.5 border-t border-surface-3">
+          <div className="flex items-center gap-2 text-[10px] text-gray-600">
+            <Activity size={12} />
+            <span>v2.4.0</span>
+          </div>
+        </div>
+      </aside>
+    </>
+  )
+}
+
+/* 移动端顶栏 */
+function MobileHeader({ onMenuToggle }) {
+  return (
+    <header className="fixed top-0 left-0 right-0 h-14 bg-surface-1 border-b border-surface-3
+                        flex items-center px-4 z-30 lg:hidden">
+      <button onClick={onMenuToggle} className="p-2 -ml-2 rounded-lg hover:bg-surface-2 transition">
+        <Menu className="w-5 h-5" />
+      </button>
+      <div className="flex items-center gap-2 ml-3">
+        <div className="w-6 h-6 bg-brand-600 rounded flex items-center justify-center font-bold text-[10px]">Q</div>
+        <span className="font-semibold text-sm">Quark CLI</span>
       </div>
-    </aside>
+    </header>
   )
 }
 
 export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   return (
     <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 ml-[220px]">
-        <div className="max-w-7xl mx-auto p-6">
+      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <MobileHeader onMenuToggle={() => setSidebarOpen(o => !o)} />
+
+      {/* 主内容区: lg 以上有侧边栏偏移, 移动端有顶栏偏移 */}
+      <main className="flex-1 lg:ml-[220px] pt-14 lg:pt-0">
+        <div className="max-w-7xl mx-auto p-4 sm:p-6">
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/history" element={<HistoryPage />} />

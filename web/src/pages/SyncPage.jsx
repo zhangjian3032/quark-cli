@@ -91,7 +91,7 @@ function PathPicker({ open, onClose, onSelect, title = '选择目录' }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-surface-1 rounded-xl border border-surface-3 w-full max-w-lg mx-4 max-h-[70vh] flex flex-col"
+      <div className="bg-surface-1 rounded-xl border border-surface-3 w-full max-w-lg mx-3 sm:mx-4 max-h-[70vh] flex flex-col"
         onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-surface-3">
           <h3 className="text-sm font-semibold">{title}</h3>
@@ -516,7 +516,7 @@ export default function SyncPage() {
       {!editMode && hasConfig && (
         <div className="bg-surface-1 rounded-xl p-4 border border-surface-3 space-y-2">
           {enabledTasks.map((t, i) => (
-            <div key={i} className="flex items-center gap-3 text-sm flex-wrap">
+            <div key={i} className="flex items-center gap-2 sm:gap-3 text-xs sm:text-sm flex-wrap">
               <span className="text-xs text-gray-600 font-mono w-5">#{i + 1}</span>
               <span className="font-medium text-gray-300 min-w-[80px]">{t.name}</span>
               <Folder className="w-3.5 h-3.5 text-brand-400 shrink-0" />
@@ -585,7 +585,7 @@ export default function SyncPage() {
               {task.total_bytes > 0 && (
                 <ProgressBar percent={task.percent || 0} speed={task.speed_human || '0 B/s'} />
               )}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              <div className="grid grid-cols-2 gap-2 sm:gap-3 text-xs">
                 <div className="bg-surface-2 rounded-lg p-2.5">
                   <div className="text-gray-500">已拷贝</div>
                   <div className="font-medium mt-0.5">{task.copied_files || 0} 文件 · {formatSize(task.copied_bytes)}</div>

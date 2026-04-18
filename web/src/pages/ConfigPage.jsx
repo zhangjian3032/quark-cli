@@ -164,7 +164,7 @@ function AccountSection() {
           )}
         </div>
         {info.sign_target > 0 && (
-          <div className="flex items-center gap-1.5 mb-5 overflow-x-auto pb-1">
+          <div className="flex items-center gap-1.5 mb-5 overflow-x-auto pb-1 -mx-1 px-1">
             {Array.from({ length: info.sign_target }, (_, i) => (
               <div key={i}
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium
@@ -183,7 +183,7 @@ function AccountSection() {
         <div className="flex items-center gap-4">
           {info.can_sign ? (
             <button onClick={handleSign} disabled={signing || info.signed_today}
-              className={`px-6 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2
+              className={`px-3 sm:px-6 py-2 sm:py-2.5 rounded-lg text-xs sm:text-sm font-medium transition-all flex items-center gap-1.5 sm:gap-2
                 ${info.signed_today
                   ? 'bg-surface-3 text-gray-500 cursor-default'
                   : 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20'}`}>
