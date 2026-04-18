@@ -568,17 +568,47 @@ class AutoDiscoverScheduler:
             logger.info("定时任务完成: %s (saved=%d, failed=%d)",
                         name, len(result.get("saved", [])), len(result.get("failed", [])))
 
+            # 写入历史记录
+            try:
+                from quark_cli.history import record as history_record
+                saved_count = len(result.get("saved", []))
+                failed_count = len(result.get("failed", []))
+                h_status = "success" if saved_count > 0 and failed_count == 0 else (
+                    "partial" if saved_count > 0 else ("error" if failed_count > 0 else "success"))
+                history_record(
+                    record_type="task",
+                    name=name,
+                    status=h_status,
+                    summary="转存 {} / 失败 {} / 跳过 {}".format(
+                        saved_count, failed_count, len(result.get("skipped", []))),
+                    detail=result,
+                    config_path=self.config_path,
+                )
+            except Exception:
+                logger.debug("写入任务历史失败", exc_info=True)
+
             # 同步到本地 NAS (可选)
             if result.get("saved") and task.get("sync", {}).get("enabled", False):
                 self._run_sync_after_save(task, result)
 
-        except Exception:
+        except Exception as exc:
             logger.exception("定时任务执行异常: %s", name)
             self._results[name] = {
                 "task_name": name,
                 "error": "执行异常",
                 "timestamp": datetime.now().isoformat(),
             }
+            try:
+                from quark_cli.history import record as history_record
+                history_record(
+                    record_type="task",
+                    name=name,
+                    status="error",
+                    summary="执行异常: {}".format(str(exc)[:200]),
+                    config_path=self.config_path,
+                )
+            except Exception:
+                pass
 
     def _run_sync_after_save(self, task, save_result):
         """转存成功后自动同步到本地 NAS"""

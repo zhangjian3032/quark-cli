@@ -847,8 +847,34 @@ class SyncScheduler:
                 logger.info("定时同步 [%s] 完成: 拷贝 %d / 跳过 %d / 失败 %d",
                              name, result.copied_files, result.skipped_files,
                              result.error_files)
+                # 写入历史
+                try:
+                    from quark_cli.history import record as history_record
+                    h_status = "success" if result.error_files == 0 else "partial"
+                    history_record(
+                        record_type="sync",
+                        name=name,
+                        status=h_status,
+                        summary="拷贝 {} / 跳过 {} / 失败 {} ({})".format(
+                            result.copied_files, result.skipped_files,
+                            result.error_files, result.speed_human or ""),
+                        detail=result.to_dict(),
+                        duration=result.elapsed,
+                        config_path=self.config_path,
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 logger.exception("定时同步 [%s] 失败: %s", name, e)
+                try:
+                    from quark_cli.history import record as history_record
+                    history_record(
+                        record_type="sync", name=name, status="error",
+                        summary="异常: {}".format(str(e)[:200]),
+                        config_path=self.config_path,
+                    )
+                except Exception:
+                    pass
 
         for task_def in enabled_tasks:
             t = threading.Thread(target=_run_one, args=(task_def,),

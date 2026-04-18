@@ -1,5 +1,7 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync } from 'lucide-react'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History } from 'lucide-react'
+import DashboardPage from './pages/DashboardPage'
+import HistoryPage from './pages/HistoryPage'
 import LibraryPage from './pages/LibraryPage'
 import DetailPage from './pages/DetailPage'
 import DiscoverPage from './pages/DiscoverPage'
@@ -13,6 +15,13 @@ import SyncPage from './pages/SyncPage'
 
 const NAV_SECTIONS = [
   {
+    title: '总览',
+    items: [
+      { to: '/',         icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/history',  icon: History,          label: '执行历史' },
+    ],
+  },
+  {
     title: '网盘',
     items: [
       { to: '/drive',           icon: HardDrive,    label: '文件管理' },
@@ -23,7 +32,7 @@ const NAV_SECTIONS = [
   {
     title: '影视中心',
     items: [
-      { to: '/',         icon: Film,         label: '媒体库' },
+      { to: '/library',  icon: Film,         label: '媒体库' },
       { to: '/discover', icon: Star,         label: '发现' },
       { to: '/meta',     icon: Clapperboard, label: '元数据' },
     ],
@@ -86,7 +95,7 @@ function Sidebar() {
       <div className="px-5 py-3 border-t border-surface-3">
         <div className="flex items-center gap-2 text-[10px] text-gray-600">
           <Activity size={12} />
-          <span>v2.3.0</span>
+          <span>v2.4.0</span>
         </div>
       </div>
     </aside>
@@ -100,7 +109,9 @@ export default function App() {
       <main className="flex-1 ml-[220px]">
         <div className="max-w-7xl mx-auto p-6">
           <Routes>
-            <Route path="/" element={<LibraryPage />} />
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/library" element={<LibraryPage />} />
             <Route path="/library/:libId" element={<LibraryPage />} />
             <Route path="/detail/:guid" element={<DetailPage />} />
             <Route path="/discover" element={<DiscoverPage />} />

@@ -253,12 +253,30 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
         if not progress:
             return
 
+        p = progress.to_dict()
+
+        # 写入历史记录
+        try:
+            from quark_cli.history import record as history_record
+            h_status = "success" if progress.status == "done" else "error"
+            history_record(
+                record_type="sync",
+                name=task_name,
+                status=h_status,
+                summary="拷贝 {} / 跳过 {} ({})".format(
+                    p.get("copied_files", 0), p.get("skipped_files", 0),
+                    p.get("speed_human", "")),
+                detail=p,
+                duration=p.get("elapsed", 0),
+            )
+        except Exception:
+            pass
+
         result = {
             "task_name": "文件同步: {}".format(task_name),
             "saved": [],
             "failed": [],
         }
-        p = progress.to_dict()
         if progress.status == "done":
             result["saved"] = [{"title": "文件同步完成", "year": "",
                                 "save_path": p.get("dest_dir", ""),
