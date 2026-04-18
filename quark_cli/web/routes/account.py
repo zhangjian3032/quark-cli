@@ -387,3 +387,96 @@ def _deep_merge(base: dict, override: dict):
             _deep_merge(base[key], val)
         else:
             base[key] = val
+
+
+# ── Cookie 保活 ──
+
+@router.get("/keepalive/status")
+def keepalive_status():
+    """获取 Cookie 保活状态"""
+    from quark_cli.keepalive import get_keepalive
+    try:
+        ka = get_keepalive()
+        return ka.status
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/keepalive/toggle")
+def keepalive_toggle():
+    """启用/禁用 Cookie 保活"""
+    from quark_cli.web.deps import get_config
+    from quark_cli.keepalive import get_keepalive
+    try:
+        cfg = get_config()
+        cfg.load()
+        ka_cfg = cfg._data.setdefault("keepalive", {})
+        current = ka_cfg.get("enabled", True)
+        ka_cfg["enabled"] = not current
+        cfg.save()
+
+        ka = get_keepalive()
+        if ka_cfg["enabled"]:
+            ka.start()
+        else:
+            ka.stop()
+
+        return {"enabled": ka_cfg["enabled"]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/keepalive/trigger")
+def keepalive_trigger():
+    """手动触发一次保活检查"""
+    from quark_cli.keepalive import get_keepalive
+    try:
+        ka = get_keepalive()
+        return ka.trigger()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class KeepAliveConfigBody(BaseModel):
+    interval_hours: Optional[int] = None
+    auto_sign: Optional[bool] = None
+    enabled: Optional[bool] = None
+
+
+@router.put("/keepalive/config")
+def keepalive_config_update(body: KeepAliveConfigBody):
+    """更新保活配置"""
+    from quark_cli.web.deps import get_config
+    from quark_cli.keepalive import get_keepalive
+    try:
+        cfg = get_config()
+        cfg.load()
+        ka_cfg = cfg._data.setdefault("keepalive", {})
+        if body.interval_hours is not None:
+            ka_cfg["interval_hours"] = max(body.interval_hours, 1)
+        if body.auto_sign is not None:
+            ka_cfg["auto_sign"] = body.auto_sign
+        if body.enabled is not None:
+            ka_cfg["enabled"] = body.enabled
+            ka = get_keepalive()
+            if body.enabled:
+                ka.start()
+            else:
+                ka.stop()
+        cfg.save()
+        return {"success": True, "keepalive": ka_cfg}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/keepalive/config")
+def keepalive_config_read():
+    """读取保活配置"""
+    from quark_cli.web.deps import get_config
+    try:
+        cfg = get_config()
+        cfg.load()
+        ka = cfg.data.get("keepalive", {"enabled": True, "interval_hours": 6, "auto_sign": True})
+        return ka
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

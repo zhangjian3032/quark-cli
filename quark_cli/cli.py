@@ -390,6 +390,19 @@ def _try_start_scheduler(config_path):
         info("定时任务调度器: 启动失败 - {}".format(e))
 
 
+
+
+def _try_start_keepalive(config_path):
+    """尝试启动 Cookie 保活"""
+    from quark_cli.display import info
+    try:
+        from quark_cli.keepalive import try_start_keepalive
+        ka = try_start_keepalive(config_path)
+        if ka:
+            info("Cookie 保活: 已启动")
+    except Exception as e:
+        info("Cookie 保活: 启动失败 - {}".format(e))
+
 def _try_start_sync_scheduler(config_path):
     """尝试启动同步定时调度器"""
     from quark_cli.display import info
@@ -482,6 +495,10 @@ def _serve(args):
     # 尝试启动同步定时调度器
     if not reload:
         _try_start_sync_scheduler(config_path)
+
+    # 尝试启动 Cookie 保活
+    if not reload:
+        _try_start_keepalive(config_path)
 
     # 自动打开浏览器
     if not no_open and not reload:
