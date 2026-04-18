@@ -390,6 +390,18 @@ def _try_start_scheduler(config_path):
         info("定时任务调度器: 启动失败 - {}".format(e))
 
 
+def _try_start_sync_scheduler(config_path):
+    """尝试启动同步定时调度器"""
+    from quark_cli.display import info
+    try:
+        from quark_cli.media.sync import try_start_sync_scheduler
+        sched = try_start_sync_scheduler(config_path)
+        if sched:
+            info("同步定时调度器: 已启动 (每 {}m)".format(sched._interval // 60))
+    except Exception as e:
+        info("同步定时调度器: 启动失败 - {}".format(e))
+
+
 def _serve(args):
     """启动 FastAPI Web 服务"""
     try:
@@ -426,6 +438,10 @@ def _serve(args):
     # 尝试启动定时任务调度器
     if not reload:
         _try_start_scheduler(config_path)
+
+    # 尝试启动同步定时调度器
+    if not reload:
+        _try_start_sync_scheduler(config_path)
 
     # 自动打开浏览器
     if not no_open and not reload:

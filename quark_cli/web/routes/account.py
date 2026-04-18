@@ -310,3 +310,80 @@ def config_bot_set(body: FeishuBotConfigBody):
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 配置导出 / 导入 ──
+
+@router.get("/config/export")
+def config_export():
+    """导出完整配置 (含明文 Cookie / Token，仅限本地使用)"""
+    from quark_cli.web.deps import get_config
+    try:
+        cfg = get_config()
+        cfg.load()
+        import copy
+        data = copy.deepcopy(cfg.data)
+        # 注入元信息
+        data["_export_meta"] = {
+            "version": "2.3.0",
+            "exported_at": __import__("datetime").datetime.now().isoformat(),
+        }
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/config/import")
+def config_import(body: dict):
+    """
+    导入配置 (合并模式)
+
+    支持两种传入方式:
+      1. 完整 config.json (含 cookie/media/sync/scheduler 等)
+      2. 部分配置 (只传 sync / scheduler 等特定 key)
+
+    导入策略: 深度合并，已有字段被覆盖，新字段追加。
+    Cookie 列表采用追加模式 (不覆盖已有 Cookie)。
+    """
+    from quark_cli.web.deps import get_config
+    try:
+        cfg = get_config()
+        cfg.load()
+
+        # 移除导出元信息
+        body.pop("_export_meta", None)
+
+        # Cookie 特殊处理: 追加而非覆盖
+        import_cookies = body.pop("cookie", None)
+        if import_cookies and isinstance(import_cookies, list):
+            existing = cfg.data.get("cookie", [])
+            if not isinstance(existing, list):
+                existing = [existing] if existing else []
+            # 去重追加
+            existing_set = set(existing)
+            for c in import_cookies:
+                if c and c not in existing_set and not c.startswith("请替换"):
+                    existing.append(c)
+            cfg._data["cookie"] = existing
+
+        # 深度合并其余配置
+        _deep_merge(cfg._data, body)
+
+        cfg.save()
+
+        return {
+            "success": True,
+            "message": "配置导入成功",
+            "keys_imported": list(body.keys()),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _deep_merge(base: dict, override: dict):
+    """递归合并 dict，override 覆盖 base"""
+    for key, val in override.items():
+        if key in base and isinstance(base[key], dict) and isinstance(val, dict):
+            _deep_merge(base[key], val)
+        else:
+            base[key] = val

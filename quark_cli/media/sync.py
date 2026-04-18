@@ -716,3 +716,185 @@ def sync_from_config(config_data: dict, task_config: Optional[dict] = None,
         progress_callback=progress_callback,
         task_name=task_name,
     )
+
+
+# ── 同步定时调度器 ──
+
+
+class SyncScheduler:
+    """
+    独立的同步定时调度器
+
+    配置 (config.json → sync):
+      {
+        "schedule_enabled": true,
+        "schedule_interval_minutes": 60,
+        "schedule_cron": "",
+        "bot_notify": true,
+        ...
+      }
+    """
+
+    def __init__(self, config_path=None):
+        self.config_path = config_path
+        self._running = False
+        self._thread = None
+        self._interval = 3600  # 默认 1 小时
+        self._enabled = False
+        self._bot_notify = False
+        self._last_run = None
+
+    def reload(self, sync_config: dict):
+        """重新加载配置"""
+        self._enabled = sync_config.get("schedule_enabled", False)
+        minutes = sync_config.get("schedule_interval_minutes", 60)
+        self._interval = max(int(minutes) * 60, 300)  # 最小 5 分钟
+        self._bot_notify = sync_config.get("bot_notify", False)
+        logger.info("同步调度器配置更新: enabled=%s, interval=%dm, notify=%s",
+                     self._enabled, self._interval // 60, self._bot_notify)
+
+    def start(self):
+        """启动调度器"""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="sync-scheduler")
+        self._thread.start()
+        logger.info("同步定时调度器已启动")
+
+    def stop(self):
+        self._running = False
+
+    def _load_config(self):
+        """从配置文件读取"""
+        try:
+            from quark_cli.config import ConfigManager
+            cfg = ConfigManager(self.config_path)
+            cfg.load()
+            sync_cfg = cfg.data.get("sync", {})
+            self.reload(sync_cfg)
+            return cfg
+        except Exception:
+            return None
+
+    def _loop(self):
+        """调度主循环"""
+        import time as _time
+        from datetime import datetime
+
+        _time.sleep(60)  # 启动后等 60 秒
+
+        while self._running:
+            try:
+                cfg = self._load_config()
+
+                if self._enabled and cfg:
+                    now = datetime.now()
+                    if (not self._last_run or
+                            (now - self._last_run).total_seconds() >= self._interval):
+                        self._last_run = now
+                        self._execute_sync(cfg)
+
+            except Exception:
+                logger.exception("同步调度循环异常")
+
+            _time.sleep(60)
+
+    def _execute_sync(self, cfg):
+        """执行一次同步"""
+        from datetime import datetime
+
+        logger.info("定时同步: 开始执行")
+
+        try:
+            result = sync_from_config(
+                config_data=cfg.data,
+                task_config=None,
+            )
+
+            logger.info("定时同步完成: 拷贝 %d / 跳过 %d / 失败 %d",
+                         result.copied_files, result.skipped_files, result.error_files)
+
+            # Bot 通知
+            if self._bot_notify:
+                self._send_notify(cfg, result)
+
+        except Exception as e:
+            logger.exception("定时同步执行失败: %s", e)
+
+    def _send_notify(self, cfg, progress):
+        """发送飞书 Bot 通知"""
+        try:
+            from quark_cli.scheduler import send_bot_notify
+
+            result = {
+                "task_name": "定时文件同步",
+                "saved": [],
+                "failed": [],
+            }
+
+            if progress.status == "done" and progress.copied_files > 0:
+                result["saved"] = [{
+                    "title": "文件同步",
+                    "year": "",
+                    "save_path": str(progress.dest_dir),
+                    "saved_count": progress.copied_files,
+                }]
+            elif progress.error_files > 0 or progress.status == "error":
+                result["failed"] = [{
+                    "title": "文件同步",
+                    "year": "",
+                    "error": "; ".join(progress.errors[:3]) if progress.errors else "未知错误",
+                }]
+            else:
+                # 全部跳过，无新文件，不通知
+                return
+
+            config_path = str(cfg.config_path) if hasattr(cfg, 'config_path') else self.config_path
+            send_bot_notify(config_path, result)
+
+        except Exception:
+            logger.exception("同步通知发送失败")
+
+    def get_status(self):
+        return {
+            "running": self._running,
+            "enabled": self._enabled,
+            "interval_minutes": self._interval // 60,
+            "bot_notify": self._bot_notify,
+            "last_run": self._last_run.isoformat() if self._last_run else None,
+        }
+
+
+# ── 同步调度器单例 ──
+
+_sync_scheduler: Optional[SyncScheduler] = None
+
+
+def get_sync_scheduler(config_path=None) -> SyncScheduler:
+    """获取同步调度器单例"""
+    global _sync_scheduler
+    if _sync_scheduler is None:
+        _sync_scheduler = SyncScheduler(config_path)
+    return _sync_scheduler
+
+
+def try_start_sync_scheduler(config_path=None):
+    """尝试启动同步定时调度器"""
+    from quark_cli.config import ConfigManager
+    cfg = ConfigManager(config_path)
+    cfg.load()
+    sync_cfg = cfg.data.get("sync", {})
+
+    if not sync_cfg.get("schedule_enabled", False):
+        logger.info("同步定时任务: 未启用，跳过")
+        return None
+
+    if not sync_cfg.get("webdav_mount") or not sync_cfg.get("local_dest"):
+        logger.info("同步定时任务: 未配置路径，跳过")
+        return None
+
+    sched = get_sync_scheduler(config_path)
+    sched.reload(sync_cfg)
+    sched.start()
+    return sched

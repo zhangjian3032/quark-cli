@@ -50,6 +50,8 @@ export const configApi = {
   setTmdb:      (data)                    => put('/config/tmdb', data),
   readBot:      ()                        => request('/config/bot'),
   setBot:       (data)                    => put('/config/bot', data),
+  export:       ()                        => request('/config/export'),
+  import:       (data)                    => post('/config/import', data),
 }
 
 // ── Drive (网盘文件) ──

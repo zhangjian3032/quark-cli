@@ -4,6 +4,7 @@ import {
   Shield, Loader2, Sparkles, Calendar, TrendingUp,
   Settings, Cookie, Server, Film, Save, Trash2, Plus,
   Eye, EyeOff, RefreshCw, AlertCircle, FileText, MessageSquare, Bot,
+  Download, Upload,
 } from 'lucide-react'
 import { accountApi, configApi } from '../api/client'
 import { PageSpinner, ErrorBanner, PageHeader } from '../components/UI'
@@ -714,6 +715,102 @@ function FeishuBotSection({ onRefresh }) {
   )
 }
 
+
+/* ════════════════════════════════════════════════
+   Section: 配置导出 / 导入
+   ════════════════════════════════════════════════ */
+function ExportImportSection({ onRefresh }) {
+  const [importing, setImporting] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  const handleExport = async () => {
+    setExporting(true)
+    setToast(null)
+    try {
+      const data = await configApi.export()
+      const json = JSON.stringify(data, null, 2)
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const ts = new Date().toISOString().slice(0, 10)
+      a.download = `quark-cli-config-${ts}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      setToast({ msg: '配置已导出', type: 'success' })
+    } catch (e) {
+      setToast({ msg: '导出失败: ' + e.message, type: 'error' })
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleImport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json,application/json'
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      setImporting(true)
+      setToast(null)
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        if (typeof data !== 'object' || Array.isArray(data)) {
+          throw new Error('无效的配置文件格式')
+        }
+        const result = await configApi.import(data)
+        const keys = result.keys_imported?.join(', ') || ''
+        setToast({ msg: `导入成功${keys ? ` (${keys})` : ''}`, type: 'success' })
+        onRefresh()
+      } catch (e) {
+        if (e instanceof SyntaxError) {
+          setToast({ msg: '文件不是有效的 JSON 格式', type: 'error' })
+        } else {
+          setToast({ msg: '导入失败: ' + e.message, type: 'error' })
+        }
+      } finally {
+        setImporting(false)
+      }
+    }
+    input.click()
+  }
+
+  return (
+    <div className="card p-6 mb-6">
+      <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+        <FileText size={20} className="text-gray-400" /> 配置管理
+      </h3>
+      <p className="text-xs text-gray-500 mb-4">
+        导出完整配置 (含 Cookie / Token) 用于备份或迁移到其他设备。导入时自动合并，Cookie 采用追加模式不会覆盖现有。
+      </p>
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={handleExport} disabled={exporting}
+          className="px-5 py-2.5 bg-surface-2 hover:bg-surface-3 border border-surface-3
+                     text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          导出配置
+        </button>
+        <button onClick={handleImport} disabled={importing}
+          className="px-5 py-2.5 bg-surface-2 hover:bg-surface-3 border border-surface-3
+                     text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+          {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+          导入配置
+        </button>
+      </div>
+      <Toast msg={toast?.msg} type={toast?.type} />
+      <div className="mt-4 p-3 bg-surface-2 rounded-lg text-xs text-gray-500 space-y-1">
+        <div>⚠️ 导出文件包含明文敏感信息 (Cookie、API Key、Token)，请妥善保管。</div>
+        <div>💡 也可以直接编辑配置文件: <code className="text-gray-400 font-mono">~/.quark-cli/config.json</code></div>
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════════════════════
    Main: ConfigPage
    ════════════════════════════════════════════════ */
@@ -759,6 +856,9 @@ export default function ConfigPage() {
 
       {/* 飞书机器人 */}
       <FeishuBotSection onRefresh={loadConfig} />
+
+      {/* 配置导出 / 导入 */}
+      <ExportImportSection onRefresh={loadConfig} />
     </>
   )
 }
