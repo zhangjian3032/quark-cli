@@ -18,3 +18,4 @@ quark_cli/web/static/
 # Patch archives
 patches/*.tar.gz
 patch-*.tar.gz
+dist-patches/

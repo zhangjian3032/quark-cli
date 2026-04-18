@@ -1,9 +1,9 @@
-"""同步 API 路由 — WebDAV → NAS 本地同步
+"""同步 API 路由 — 多任务并行同步
 
 提供:
   GET  /sync/status              所有同步任务状态
   GET  /sync/status/{name}       单个任务进度
-  POST /sync/start               启动同步
+  POST /sync/start               启动同步 (单个 / 全部)
   POST /sync/cancel/{name}       取消同步
   GET  /sync/config              获取同步配置
   PUT  /sync/config              更新同步配置
@@ -26,6 +26,31 @@ def _get_config():
     return get_config()
 
 
+def _normalize_sync_config(sync_cfg: dict) -> dict:
+    """
+    兼容旧配置: 如果没有 tasks[] 但有 webdav_mount/local_dest,
+    自动包装成单任务列表。
+    """
+    if "tasks" in sync_cfg and isinstance(sync_cfg["tasks"], list):
+        return sync_cfg
+
+    # 旧格式 → 新格式
+    webdav = sync_cfg.get("webdav_mount", "")
+    local = sync_cfg.get("local_dest", "")
+    if webdav and local:
+        sync_cfg["tasks"] = [{
+            "name": "default",
+            "source": webdav,
+            "dest": local,
+            "delete_after_sync": sync_cfg.get("delete_after_sync", False),
+            "enabled": True,
+        }]
+    else:
+        sync_cfg.setdefault("tasks", [])
+
+    return sync_cfg
+
+
 # ── 服务器本地目录浏览 ──
 
 @router.get("/sync/browse")
@@ -33,20 +58,9 @@ def sync_browse_dir(path: str = Query("/", description="要浏览的目录路径
     """
     浏览服务器本地文件系统目录
 
-    用途: 前端路径选择器，用户可以逐级浏览并选择 WebDAV 挂载目录或 NAS 目标目录。
+    用途: 前端路径选择器，用户可以逐级浏览并选择目录。
     只返回目录，不返回文件。
-
-    Returns:
-      {
-        "path": "/mnt",
-        "parent": "/",
-        "dirs": [
-          {"name": "alist", "path": "/mnt/alist"},
-          {"name": "nas", "path": "/mnt/nas"},
-        ]
-      }
     """
-    # 安全限制: 规范化路径，防止 .. 穿越
     real_path = os.path.realpath(path)
 
     if not os.path.exists(real_path):
@@ -65,20 +79,13 @@ def sync_browse_dir(path: str = Query("/", description="要浏览的目录路径
             continue
         full = os.path.join(real_path, name)
         if os.path.isdir(full):
-            dirs.append({
-                "name": name,
-                "path": full,
-            })
+            dirs.append({"name": name, "path": full})
 
     parent = os.path.dirname(real_path)
     if parent == real_path:
-        parent = None  # 已是根目录
+        parent = None
 
-    return {
-        "path": real_path,
-        "parent": parent,
-        "dirs": dirs,
-    }
+    return {"path": real_path, "parent": parent, "dirs": dirs}
 
 
 # ── 同步状态 ──
@@ -111,11 +118,11 @@ def sync_start(data: dict = Body(...)):
 
     Body:
       {
-        "task_name": "my-sync",
-        "source_dir": "/mnt/alist/夸克/媒体",
-        "dest_dir": "/mnt/nas/media",
+        "task_name": "my-sync",       // 可选, 指定单个任务名
+        "run_all": true,              // 为 true 时启动所有 enabled 任务
+        "source_dir": "/mnt/...",     // 手动指定 (优先级最高)
+        "dest_dir": "/mnt/...",
         "delete_after_sync": false,
-        "scheduler_task": "每日随机电影",
         "bot_notify": false,
       }
     """
@@ -123,83 +130,102 @@ def sync_start(data: dict = Body(...)):
 
     cfg = _get_config()
     cfg.load()
-
-    task_name = data.get("task_name", "manual")
-    source = data.get("source_dir", "")
-    dest = data.get("dest_dir", "")
-    delete = data.get("delete_after_sync", False)
-    sched_task_name = data.get("scheduler_task", "")
-    bot_notify = data.get("bot_notify", False)
+    sync_cfg = _normalize_sync_config(cfg.data.get("sync", {}))
+    tasks_list = sync_cfg.get("tasks", [])
+    bot_notify = data.get("bot_notify", sync_cfg.get("bot_notify", False))
 
     mgr = get_sync_manager()
+    started = []
 
     try:
+        # 模式 1: 手动指定 source/dest
+        source = data.get("source_dir", "")
+        dest = data.get("dest_dir", "")
         if source and dest:
+            task_name = data.get("task_name", "manual")
             mgr.start_sync(
                 task_name=task_name,
                 source_dir=source,
                 dest_dir=dest,
-                delete_after_sync=delete,
+                delete_after_sync=data.get("delete_after_sync", False),
             )
-        elif sched_task_name:
-            tasks = cfg.data.get("scheduler", {}).get("tasks", [])
-            task_config = None
-            for t in tasks:
-                if t.get("name") == sched_task_name:
-                    task_config = t
-                    break
-            if not task_config:
-                raise HTTPException(status_code=404, detail="调度任务不存在: {}".format(sched_task_name))
+            started.append(task_name)
 
-            global_sync = cfg.data.get("sync", {})
-            task_sync = task_config.get("sync", {})
+        # 模式 2: run_all — 启动所有 enabled 任务
+        elif data.get("run_all"):
+            for t in tasks_list:
+                if not t.get("enabled", True):
+                    continue
+                src = t.get("source", "")
+                dst = t.get("dest", "")
+                if not src or not dst:
+                    continue
+                tname = t.get("name", "sync-{}".format(len(started)))
+                try:
+                    mgr.start_sync(
+                        task_name=tname,
+                        source_dir=src,
+                        dest_dir=dst,
+                        delete_after_sync=t.get("delete_after_sync", False),
+                        exclude_patterns=t.get("exclude_patterns",
+                                               sync_cfg.get("exclude_patterns", [])),
+                    )
+                    started.append(tname)
+                except RuntimeError:
+                    # 该任务正在运行，跳过
+                    pass
 
-            webdav = task_sync.get("webdav_mount") or global_sync.get("webdav_mount", "")
-            local = task_sync.get("local_dest") or global_sync.get("local_dest", "")
+            if not started:
+                raise HTTPException(status_code=400,
+                                    detail="没有可启动的同步任务 (请先配置)")
 
-            if not webdav or not local:
-                raise HTTPException(status_code=400, detail="未配置同步路径")
-
-            save_base = task_config.get("save_base_path", "")
-            if save_base:
-                rel = save_base.lstrip("/")
-                webdav = os.path.join(webdav, rel)
-                local = os.path.join(local, rel)
-
-            del_after = task_sync.get("delete_after_sync", global_sync.get("delete_after_sync", False))
-            buf = task_sync.get("buffer_size", global_sync.get("buffer_size", DEFAULT_BUFFER_SIZE))
-            exclude = task_sync.get("exclude_patterns", global_sync.get("exclude_patterns", []))
-
-            mgr.start_sync(
-                task_name=task_name or sched_task_name,
-                source_dir=webdav,
-                dest_dir=local,
-                delete_after_sync=del_after,
-                buffer_size=buf,
-                exclude_patterns=exclude,
-            )
+        # 模式 3: 按 task_name 启动单个
         else:
-            global_sync = cfg.data.get("sync", {})
-            webdav = global_sync.get("webdav_mount", "")
-            local = global_sync.get("local_dest", "")
+            task_name = data.get("task_name", "")
+            matched = None
+            for t in tasks_list:
+                if t.get("name") == task_name:
+                    matched = t
+                    break
 
-            if not webdav or not local:
-                raise HTTPException(status_code=400, detail="未配置同步路径")
+            if matched:
+                src = matched.get("source", "")
+                dst = matched.get("dest", "")
+                if not src or not dst:
+                    raise HTTPException(status_code=400,
+                                        detail="任务 {} 未配置路径".format(task_name))
+                mgr.start_sync(
+                    task_name=task_name,
+                    source_dir=src,
+                    dest_dir=dst,
+                    delete_after_sync=matched.get("delete_after_sync", False),
+                    exclude_patterns=matched.get("exclude_patterns",
+                                                 sync_cfg.get("exclude_patterns", [])),
+                )
+                started.append(task_name)
+            else:
+                # 回退到旧的全局配置
+                webdav = sync_cfg.get("webdav_mount", "")
+                local = sync_cfg.get("local_dest", "")
+                if not webdav or not local:
+                    raise HTTPException(status_code=400,
+                                        detail="未找到任务且未配置全局同步路径")
+                tname = task_name or "default"
+                mgr.start_sync(
+                    task_name=tname,
+                    source_dir=webdav,
+                    dest_dir=local,
+                    delete_after_sync=sync_cfg.get("delete_after_sync", False),
+                    exclude_patterns=sync_cfg.get("exclude_patterns", []),
+                )
+                started.append(tname)
 
-            mgr.start_sync(
-                task_name=task_name,
-                source_dir=webdav,
-                dest_dir=local,
-                delete_after_sync=global_sync.get("delete_after_sync", False),
-                buffer_size=global_sync.get("buffer_size", DEFAULT_BUFFER_SIZE),
-                exclude_patterns=global_sync.get("exclude_patterns", []),
-            )
-
-        # 异步等待完成后发送 Bot 通知 (如果启用)
+        # Bot 通知
         if bot_notify:
-            _schedule_bot_notify_after_sync(cfg, task_name)
+            for tname in started:
+                _schedule_bot_notify_after_sync(cfg, tname)
 
-        return {"status": "started", "task_name": task_name}
+        return {"status": "started", "tasks": started}
 
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
@@ -215,7 +241,6 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
         from quark_cli.media.sync import get_sync_manager
         mgr = get_sync_manager()
 
-        # 等待同步完成 (最多 24 小时)
         for _ in range(86400):
             progress = mgr.get_progress(task_name)
             if not progress:
@@ -228,7 +253,6 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
         if not progress:
             return
 
-        # 构造通知结果
         result = {
             "task_name": "文件同步: {}".format(task_name),
             "saved": [],
@@ -243,7 +267,6 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
             result["failed"] = [{"title": "文件同步失败", "year": "",
                                  "error": "; ".join(p.get("errors", [])[:3])}]
 
-        # 发送通知
         try:
             from quark_cli.scheduler import send_bot_notify
             config_path = cfg.config_path if hasattr(cfg, 'config_path') else None
@@ -251,7 +274,8 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
         except Exception:
             pass
 
-    t = threading.Thread(target=_wait_and_notify, daemon=True, name="sync-notify-{}".format(task_name))
+    t = threading.Thread(target=_wait_and_notify, daemon=True,
+                         name="sync-notify-{}".format(task_name))
     t.start()
 
 
@@ -271,35 +295,50 @@ def sync_cancel(task_name: str):
 
 @router.get("/sync/config")
 def sync_config_get():
-    """获取同步配置"""
+    """获取同步配置 (已归一化为 tasks[])"""
     cfg = _get_config()
     cfg.load()
-    return cfg.data.get("sync", {})
+    sync_cfg = _normalize_sync_config(cfg.data.get("sync", {}))
+    return sync_cfg
 
 
 @router.put("/sync/config")
 def sync_config_update(data: dict = Body(...)):
-    """更新同步配置"""
+    """
+    更新同步配置
+
+    支持:
+      - tasks: [{name, source, dest, delete_after_sync, enabled, exclude_patterns}, ...]
+      - schedule_enabled, schedule_interval_minutes, bot_notify
+      - 旧字段 webdav_mount / local_dest (向后兼容)
+    """
     cfg = _get_config()
     cfg.load()
 
     if "sync" not in cfg._data:
         cfg._data["sync"] = {}
 
-    for key in ["webdav_mount", "local_dest", "delete_after_sync",
-                "buffer_size", "exclude_patterns",
-                "schedule_enabled", "schedule_interval_minutes", "schedule_cron",
-                "bot_notify"]:
+    sc = cfg._data["sync"]
+
+    # 更新 tasks 列表
+    if "tasks" in data:
+        sc["tasks"] = data["tasks"]
+
+    # 更新全局选项
+    for key in ["schedule_enabled", "schedule_interval_minutes", "schedule_cron",
+                "bot_notify", "exclude_patterns",
+                "webdav_mount", "local_dest", "delete_after_sync", "buffer_size"]:
         if key in data:
-            cfg._data["sync"][key] = data[key]
+            sc[key] = data[key]
 
     cfg.save()
 
     # 如果定时配置变更，通知调度器重载
-    if any(k in data for k in ("schedule_enabled", "schedule_interval_minutes", "schedule_cron")):
+    if any(k in data for k in ("schedule_enabled", "schedule_interval_minutes",
+                                "schedule_cron", "tasks")):
         _reload_sync_scheduler(cfg)
 
-    return {"status": "updated", "sync": cfg._data["sync"]}
+    return {"status": "updated", "sync": _normalize_sync_config(sc)}
 
 
 def _reload_sync_scheduler(cfg):
@@ -336,7 +375,8 @@ async def sync_progress_stream(task_name: str):
         try:
             current = mgr.get_progress(task_name)
             if current:
-                yield "data: {}\n\n".format(json.dumps(current.to_dict(), ensure_ascii=False))
+                yield "data: {}\n\n".format(json.dumps(current.to_dict(),
+                                                        ensure_ascii=False))
 
             while True:
                 try:

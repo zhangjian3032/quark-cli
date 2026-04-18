@@ -801,26 +801,69 @@ class SyncScheduler:
             _time.sleep(60)
 
     def _execute_sync(self, cfg):
-        """执行一次同步"""
-        from datetime import datetime
+        """执行一次同步 — 支持多任务并行"""
+        sync_cfg = cfg.data.get("sync", {})
+        tasks_list = sync_cfg.get("tasks", [])
 
-        logger.info("定时同步: 开始执行")
+        # 兼容旧配置: 无 tasks 时走旧的单任务逻辑
+        if not tasks_list:
+            webdav = sync_cfg.get("webdav_mount", "")
+            local = sync_cfg.get("local_dest", "")
+            if webdav and local:
+                tasks_list = [{
+                    "name": "default",
+                    "source": webdav,
+                    "dest": local,
+                    "delete_after_sync": sync_cfg.get("delete_after_sync", False),
+                    "enabled": True,
+                }]
 
-        try:
-            result = sync_from_config(
-                config_data=cfg.data,
-                task_config=None,
-            )
+        enabled_tasks = [t for t in tasks_list if t.get("enabled", True)]
+        if not enabled_tasks:
+            logger.info("定时同步: 无可用任务")
+            return
 
-            logger.info("定时同步完成: 拷贝 %d / 跳过 %d / 失败 %d",
-                         result.copied_files, result.skipped_files, result.error_files)
+        logger.info("定时同步: 启动 %d 个任务", len(enabled_tasks))
 
-            # Bot 通知
-            if self._bot_notify:
-                self._send_notify(cfg, result)
+        results = []
+        threads = []
 
-        except Exception as e:
-            logger.exception("定时同步执行失败: %s", e)
+        def _run_one(task_def):
+            name = task_def.get("name", "sync")
+            src = task_def.get("source", "")
+            dst = task_def.get("dest", "")
+            if not src or not dst:
+                return
+            try:
+                result = sync_files(
+                    source_dir=src,
+                    dest_dir=dst,
+                    delete_after_sync=task_def.get("delete_after_sync", False),
+                    exclude_patterns=task_def.get("exclude_patterns",
+                                                  sync_cfg.get("exclude_patterns", [])),
+                    task_name=name,
+                )
+                results.append((name, result))
+                logger.info("定时同步 [%s] 完成: 拷贝 %d / 跳过 %d / 失败 %d",
+                             name, result.copied_files, result.skipped_files,
+                             result.error_files)
+            except Exception as e:
+                logger.exception("定时同步 [%s] 失败: %s", name, e)
+
+        for task_def in enabled_tasks:
+            t = threading.Thread(target=_run_one, args=(task_def,),
+                                 daemon=True,
+                                 name="sched-sync-{}".format(task_def.get("name", "")))
+            threads.append(t)
+            t.start()
+
+        # 等待所有完成
+        for t in threads:
+            t.join(timeout=86400)
+
+        # Bot 通知汇总
+        if self._bot_notify and results:
+            self._send_notify_multi(cfg, results)
 
     def _send_notify(self, cfg, progress):
         """发送飞书 Bot 通知"""
@@ -856,6 +899,43 @@ class SyncScheduler:
         except Exception:
             logger.exception("同步通知发送失败")
 
+    def _send_notify_multi(self, cfg, results):
+        """多任务汇总通知"""
+        try:
+            from quark_cli.scheduler import send_bot_notify
+
+            saved_items = []
+            failed_items = []
+            for name, progress in results:
+                if progress.status == "done" and progress.copied_files > 0:
+                    saved_items.append({
+                        "title": name,
+                        "year": "",
+                        "save_path": str(progress.dest_dir),
+                        "saved_count": progress.copied_files,
+                    })
+                elif progress.error_files > 0 or progress.status == "error":
+                    failed_items.append({
+                        "title": name,
+                        "year": "",
+                        "error": "; ".join(progress.errors[:3]) if progress.errors else "未知错误",
+                    })
+
+            if not saved_items and not failed_items:
+                return  # 全部跳过, 不通知
+
+            result = {
+                "task_name": "定时文件同步 ({} 任务)".format(len(results)),
+                "saved": saved_items,
+                "failed": failed_items,
+            }
+
+            config_path = str(cfg.config_path) if hasattr(cfg, 'config_path') else self.config_path
+            send_bot_notify(config_path, result)
+
+        except Exception:
+            logger.exception("同步汇总通知发送失败")
+
     def get_status(self):
         return {
             "running": self._running,
@@ -890,7 +970,12 @@ def try_start_sync_scheduler(config_path=None):
         logger.info("同步定时任务: 未启用，跳过")
         return None
 
-    if not sync_cfg.get("webdav_mount") or not sync_cfg.get("local_dest"):
+    # 检查是否有可用任务 (新格式 tasks[] 或旧格式 webdav_mount)
+    tasks_list = sync_cfg.get("tasks", [])
+    has_tasks = any(t.get("source") and t.get("dest") for t in tasks_list)
+    has_legacy = sync_cfg.get("webdav_mount") and sync_cfg.get("local_dest")
+
+    if not has_tasks and not has_legacy:
         logger.info("同步定时任务: 未配置路径，跳过")
         return None
 

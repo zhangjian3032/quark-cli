@@ -318,7 +318,7 @@ Web 面板:
 
     # ========== serve (Web 面板) ==========
     serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
-    serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0)")
+    serve_parser.add_argument("--host", default="::", help="监听地址 (默认 :: 双栈, 同时支持 IPv4/IPv6)")
     serve_parser.add_argument("--port", type=int, default=9090, help="监听端口 (默认 9090)")
     serve_parser.add_argument("--reload", action="store_true", help="开发模式: 热重载")
     serve_parser.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
@@ -414,7 +414,7 @@ def _serve(args):
         import sys
         sys.exit(1)
 
-    host = getattr(args, "host", "0.0.0.0")
+    host = getattr(args, "host", "::")
     port = getattr(args, "port", 9090)
     reload = getattr(args, "reload", False)
     no_open = getattr(args, "no_open", False)
@@ -424,10 +424,22 @@ def _serve(args):
     from quark_cli.web.deps import set_config_path
     set_config_path(config_path)
 
+    # --- IPv6 地址格式处理 ---
+    def _display_host(h):
+        """将监听地址转为浏览器可用的 host 部分"""
+        if h in ("::", "0.0.0.0"):
+            return "127.0.0.1"          # 本机回环, 浏览器兼容最好
+        if ":" in h and not h.startswith("["):
+            return "[{}]".format(h)      # 裸 IPv6 需要方括号
+        return h
+
+    display = _display_host(host)
+
     from quark_cli.display import success, info, kvline
     success("启动 Quark CLI Web 面板")
-    kvline("地址", "http://{}:{}".format("127.0.0.1" if host == "0.0.0.0" else host, port))
-    kvline("API 文档", "http://{}:{}/api/docs".format("127.0.0.1" if host == "0.0.0.0" else host, port))
+    kvline("监听", "{} (IPv6 双栈)".format(host) if host == "::" else host)
+    kvline("地址", "http://{}:{}".format(display, port))
+    kvline("API 文档", "http://{}:{}/api/docs".format(display, port))
     if reload:
         info("开发模式: 热重载已启用")
 
@@ -446,7 +458,7 @@ def _serve(args):
     # 自动打开浏览器
     if not no_open and not reload:
         import threading, webbrowser
-        url = "http://{}:{}".format("127.0.0.1" if host == "0.0.0.0" else host, port)
+        url = "http://{}:{}".format(display, port)
         threading.Timer(1.5, webbrowser.open, args=[url]).start()
 
     uvicorn.run(
