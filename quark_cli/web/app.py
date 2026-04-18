@@ -33,7 +33,7 @@ def create_app(config_path=None):
 
     app.state.config_path = config_path
 
-    from quark_cli.web.routes import media, discovery, drive, search, account, scheduler, sync, dashboard
+    from quark_cli.web.routes import media, discovery, drive, search, account, scheduler, sync, dashboard, subscribe
     app.include_router(dashboard.router, prefix="/api")
     app.include_router(media.router, prefix="/api")
     app.include_router(discovery.router, prefix="/api")
@@ -42,6 +42,7 @@ def create_app(config_path=None):
     app.include_router(account.router, prefix="/api")
     app.include_router(scheduler.router, prefix="/api")
     app.include_router(sync.router, prefix="/api")
+    app.include_router(subscribe.router, prefix="/api")
 
     @app.get("/api/health")
     def health():

@@ -318,7 +318,7 @@ Web 面板:
 
     # ========== serve (Web 面板) ==========
     serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
-    serve_parser.add_argument("--host", default="::", help="监听地址 (默认 :: 双栈, 同时支持 IPv4/IPv6)")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0; Linux 可用 :: 启用 IPv6 双栈)")
     serve_parser.add_argument("--port", type=int, default=9090, help="监听端口 (默认 9090)")
     serve_parser.add_argument("--reload", action="store_true", help="开发模式: 热重载")
     serve_parser.add_argument("--no-open", action="store_true", help="不自动打开浏览器")
@@ -402,6 +402,20 @@ def _try_start_sync_scheduler(config_path):
         info("同步定时调度器: 启动失败 - {}".format(e))
 
 
+
+
+def _try_start_subscribe_scheduler(config_path):
+    """尝试启动订阅追剧调度器"""
+    from quark_cli.display import info
+    try:
+        from quark_cli.subscribe import try_start_subscribe_scheduler
+        sched = try_start_subscribe_scheduler(config_path)
+        if sched:
+            info("订阅追剧调度器: 已启动")
+    except Exception as e:
+        info("订阅追剧调度器: 启动失败 - {}".format(e))
+
+
 def _serve(args):
     """启动 FastAPI Web 服务"""
     try:
@@ -414,8 +428,22 @@ def _serve(args):
         import sys
         sys.exit(1)
 
-    host = getattr(args, "host", "::")
+    host = getattr(args, "host", "0.0.0.0")
     port = getattr(args, "port", 9090)
+
+    # IPv6 双栈: 仅 Linux + bindv6only=0 时才安全使用 ::
+    if host == "::":
+        import platform
+        if platform.system() != "Linux":
+            # macOS/BSD 默认 IPV6_V6ONLY=1, bind :: 无法接受 IPv4
+            host = "0.0.0.0"
+        else:
+            try:
+                with open("/proc/sys/net/ipv6/conf/all/bindv6only") as _f:
+                    if _f.read().strip() == "1":
+                        host = "0.0.0.0"
+            except OSError:
+                host = "0.0.0.0"
     reload = getattr(args, "reload", False)
     no_open = getattr(args, "no_open", False)
 
@@ -437,7 +465,7 @@ def _serve(args):
 
     from quark_cli.display import success, info, kvline
     success("启动 Quark CLI Web 面板")
-    kvline("监听", "{} (IPv6 双栈)".format(host) if host == "::" else host)
+    kvline("监听", "{} (IPv6 双栈)".format(host) if ":" in host else host)
     kvline("地址", "http://{}:{}".format(display, port))
     kvline("API 文档", "http://{}:{}/api/docs".format(display, port))
     if reload:

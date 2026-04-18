@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  RefreshCw, User, HardDrive, Cloud, CalendarClock, FolderSync,
+  RefreshCw, User, HardDrive, Cloud, CalendarClock, FolderSync, Tv,
   CheckCircle, AlertCircle, XCircle, Clock, TrendingUp, Database,
   ChevronRight, Loader2, AlertTriangle,
 } from 'lucide-react'
@@ -38,6 +38,7 @@ const typeLabel = {
   sync: '文件同步',
   sign: '签到',
   auto_save: '自动转存',
+  subscribe: '订阅追剧',
 }
 
 /* ─── 卡片组件 ─── */
@@ -113,6 +114,7 @@ export default function DashboardPage() {
   const sync = data?.sync || {}
   const hist = data?.history || {}
   const disks = data?.disks || {}
+  const subs = data?.subscriptions || {}
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -129,7 +131,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 顶部统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
         <StatCard icon={User} label="账号"
           value={acct.nickname || (acct.error ? '未连接' : '—')}
           sub={acct.vip_type || ''}
@@ -152,6 +154,12 @@ export default function DashboardPage() {
           sub={sync.schedule_enabled ? '定时同步已启用' : ''}
           iconColor={sync.active_tasks > 0 ? 'text-brand-400' : 'text-gray-400'}
           to="/sync" />
+
+        <StatCard icon={Tv} label="订阅追剧"
+          value={subs.active > 0 ? `${subs.active} 部追更中` : `${subs.total || 0} 部`}
+          sub={subs.finished ? `${subs.finished} 部已完结` : ''}
+          iconColor={subs.active > 0 ? 'text-purple-400' : 'text-gray-400'}
+          to="/subscriptions" />
       </div>
 
       {/* 网盘空间 + 磁盘使用 */}

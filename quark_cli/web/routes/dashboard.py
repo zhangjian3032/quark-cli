@@ -93,6 +93,25 @@ def dashboard():
     except Exception:
         result["sync"] = {"configured_tasks": 0, "active_tasks": 0}
 
+
+    # 3.5 订阅追剧状态
+    try:
+        from quark_cli.subscribe import get_subscribe_scheduler
+        sub_scheduler = get_subscribe_scheduler()
+        sub_status = sub_scheduler.get_status()
+        subs = sub_status.get("subscriptions", [])
+        active_subs = [s for s in subs if s.get("enabled") and not s.get("finished")]
+        finished_subs = [s for s in subs if s.get("finished")]
+        result["subscriptions"] = {
+            "running": sub_status.get("running", False),
+            "total": len(subs),
+            "active": len(active_subs),
+            "finished": len(finished_subs),
+            "items": subs[:5],  # Dashboard 只展示前5个
+        }
+    except Exception:
+        result["subscriptions"] = {"total": 0, "active": 0}
+
     # 4. 历史统计
     try:
         from quark_cli.history import stats
