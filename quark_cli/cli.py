@@ -40,6 +40,12 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli media discover --list top_rated        高分影视推荐
   quark-cli media auto-save "流浪地球2"            自动搜索+转存
 
+文件同步:
+  quark-cli sync run                               执行 WebDAV → NAS 同步
+  quark-cli sync run --source /mnt/alist --dest /mnt/nas  手动指定同步路径
+  quark-cli sync config --show                     查看同步配置
+  quark-cli sync status                            查看同步状态
+
 飞书机器人:
   quark-cli bot                                    启动飞书影视转存机器人
   quark-cli bot --app-id <id> --app-secret <key>   指定凭证启动
@@ -285,6 +291,25 @@ Web 面板:
                       help="仅搜索和排序，不实际转存")
 
 
+    # ========== sync (WebDAV → NAS 同步) ==========
+    sync_parser = subparsers.add_parser("sync", help="WebDAV 挂载目录 → NAS 本地文件同步")
+    sync_sub = sync_parser.add_subparsers(dest="sync_action")
+
+    sr = sync_sub.add_parser("run", help="执行同步 (默认)")
+    sr.add_argument("--source", help="源目录 (WebDAV 挂载路径)")
+    sr.add_argument("--dest", help="目标目录 (NAS 本地路径)")
+    sr.add_argument("--delete", action="store_true", default=False, help="同步后删除源文件")
+    sr.add_argument("--task", help="指定调度任务名称 (使用该任务的同步配置)")
+    sr.add_argument("--no-progress", action="store_true", default=False, help="不显示进度条")
+
+    sync_sub.add_parser("status", help="查看同步状态")
+
+    sc_sync = sync_sub.add_parser("config", help="查看/设置同步配置")
+    sc_sync.add_argument("--show", action="store_true", help="显示当前配置")
+    sc_sync.add_argument("--webdav-mount", help="设置 WebDAV 挂载路径")
+    sc_sync.add_argument("--local-dest", help="设置本地目标路径")
+    sc_sync.add_argument("--delete-after-sync", choices=["true", "false"], help="设置同步后是否删除源")
+
     # ========== bot (飞书机器人) ==========
     bot_parser = subparsers.add_parser("bot", help="启动飞书/Lark 机器人 (影视自动转存)")
     bot_parser.add_argument("--app-id", help="飞书应用 APP_ID")
@@ -486,6 +511,7 @@ def main():
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
     from quark_cli.commands import media_cmd
+    from quark_cli.commands import sync_cmd
 
     # serve 命令特殊处理 (不通过 handlers dict)
     if args.command == "serve":
@@ -507,6 +533,7 @@ def main():
         "drive": drive_cmd.handle,
         "task": task_cmd.handle,
         "media": media_cmd.handle,
+        "sync": sync_cmd.handle,
     }
 
     handler = handlers.get(args.command)

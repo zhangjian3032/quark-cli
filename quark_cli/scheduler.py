@@ -568,6 +568,10 @@ class AutoDiscoverScheduler:
             logger.info("定时任务完成: %s (saved=%d, failed=%d)",
                         name, len(result.get("saved", [])), len(result.get("failed", [])))
 
+            # 同步到本地 NAS (可选)
+            if result.get("saved") and task.get("sync", {}).get("enabled", False):
+                self._run_sync_after_save(task, result)
+
         except Exception:
             logger.exception("定时任务执行异常: %s", name)
             self._results[name] = {
@@ -575,6 +579,48 @@ class AutoDiscoverScheduler:
                 "error": "执行异常",
                 "timestamp": datetime.now().isoformat(),
             }
+
+    def _run_sync_after_save(self, task, save_result):
+        """转存成功后自动同步到本地 NAS"""
+        name = task["name"]
+        try:
+            from quark_cli.config import ConfigManager
+            from quark_cli.media.sync import sync_from_config
+
+            cfg = ConfigManager(self.config_path)
+            cfg.load()
+
+            logger.info("开始同步到本地: %s", name)
+            sync_progress = sync_from_config(
+                config_data=cfg.data,
+                task_config=task,
+            )
+
+            if sync_progress.status == "done":
+                logger.info(
+                    "同步完成: %s — 拷贝 %d / 跳过 %d / 删除 %d",
+                    name,
+                    sync_progress.copied_files,
+                    sync_progress.skipped_files,
+                    sync_progress.deleted_files,
+                )
+                # 追加同步信息到结果
+                save_result["sync"] = {
+                    "status": "done",
+                    "copied": sync_progress.copied_files,
+                    "skipped": sync_progress.skipped_files,
+                    "deleted": sync_progress.deleted_files,
+                }
+            else:
+                logger.warning("同步异常: %s — %s", name, sync_progress.errors)
+                save_result["sync"] = {
+                    "status": sync_progress.status,
+                    "errors": sync_progress.errors,
+                }
+
+        except Exception as e:
+            logger.exception("同步到本地失败: %s", name)
+            save_result["sync"] = {"status": "error", "error": str(e)}
 
     def get_status(self):
         """获取调度器状态"""

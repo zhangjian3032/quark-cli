@@ -1,5 +1,5 @@
 import { Routes, Route, NavLink } from 'react-router-dom'
-import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock } from 'lucide-react'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync } from 'lucide-react'
 import LibraryPage from './pages/LibraryPage'
 import DetailPage from './pages/DetailPage'
 import DiscoverPage from './pages/DiscoverPage'
@@ -9,6 +9,7 @@ import ResourceSearchPage from './pages/ResourceSearchPage'
 import ConfigPage from './pages/ConfigPage'
 import TmdbDetailPage from './pages/TmdbDetailPage'
 import SchedulerPage from './pages/SchedulerPage'
+import SyncPage from './pages/SyncPage'
 
 const NAV_SECTIONS = [
   {
@@ -31,6 +32,7 @@ const NAV_SECTIONS = [
     title: '自动化',
     items: [
       { to: '/scheduler', icon: CalendarClock, label: '定时任务' },
+      { to: '/sync',      icon: FolderSync,    label: '文件同步' },
     ],
   },
 ]
@@ -107,6 +109,7 @@ export default function App() {
             <Route path="/drive" element={<DrivePage />} />
             <Route path="/resource-search" element={<ResourceSearchPage />} />
             <Route path="/scheduler" element={<SchedulerPage />} />
+            <Route path="/sync" element={<SyncPage />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </div>
