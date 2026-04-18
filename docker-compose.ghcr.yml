@@ -1,0 +1,21 @@
+# 快速部署 — 直接拉取预构建镜像，无需本地编译
+# 用法:
+#   1. 复制此文件到任意目录
+#   2. 修改 USERNAME 为实际的 GitHub 用户名
+#   3. docker compose -f docker-compose.ghcr.yml up -d
+
+version: "3.8"
+
+services:
+  quark-cli:
+    image: ghcr.io/USERNAME/quark-cli:latest
+    container_name: quark-cli
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./data/config:/root/.quark-cli
+      - /mnt/alist:/mnt/alist:ro
+      - /mnt/nas/media:/mnt/nas/media
+    environment:
+      - TZ=Asia/Shanghai

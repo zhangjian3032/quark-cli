@@ -2,6 +2,9 @@ version: "3.8"
 
 services:
   quark-cli:
+    # 本地构建用 build: .
+    # 拉取预构建镜像用下面的 image（替换 USERNAME 为你的 GitHub 用户名）
+    # image: ghcr.io/USERNAME/quark-cli:latest
     build: .
     image: quark-cli:latest
     container_name: quark-cli

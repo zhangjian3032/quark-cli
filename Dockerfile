@@ -4,7 +4,7 @@ FROM python:3.11-slim AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY web/package.json web/package-lock.json* ./web/
-RUN cd web && npm ci --no-audit --no-fund
+RUN cd web && npm install --no-audit --no-fund
 COPY web/ ./web/
 COPY quark_cli/ ./quark_cli/
 RUN cd web && npm run build
@@ -17,12 +17,12 @@ LABEL description="夸克网盘 CLI + Web 管理面板"
 
 WORKDIR /app
 
-# 安装 Python 依赖
+# 安装 Python 依赖（editable 模式，__file__ 指向 /app/quark_cli/）
 COPY pyproject.toml README.md ./
 COPY quark_cli/ ./quark_cli/
-RUN pip install --no-cache-dir ".[all]"
+RUN pip install --no-cache-dir -e ".[all]"
 
-# 拷贝前端构建产物
+# 拷贝前端构建产物（直接落入 /app/quark_cli/web/static/）
 COPY --from=builder /build/quark_cli/web/static/ ./quark_cli/web/static/
 
 # 配置目录 (可挂载)
