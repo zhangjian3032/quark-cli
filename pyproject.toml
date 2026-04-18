@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quark-cli"
 version = "2.3.0"
-description = "夸克网盘命令行工具 - 签到/搜索/转存/文件管理/影视中心 一站式 CLI"
+description = "夸克网盘命令行工具 - 签到/搜索/转存/文件管理/影视中心 一站式 CLI + Web Dashboard"
 readme = "README.md"
 license = {text = "AGPL-3.0"}
 requires-python = ">=3.8"
 authors = [
     {name = "quark-cli"}
 ]
-keywords = ["quark", "netdisk", "cli", "cloud-drive", "media", "fnos"]
+keywords = ["quark", "netdisk", "cli", "cloud-drive", "media", "fnos", "nas"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -56,3 +56,6 @@ Documentation = "https://github.com/zhangjian3032/quark-cli/wiki"
 
 [tool.setuptools.packages.find]
 include = ["quark_cli*"]
+
+[tool.setuptools.package-data]
+"quark_cli.web" = ["static/**/*"]

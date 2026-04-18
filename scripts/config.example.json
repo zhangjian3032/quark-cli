@@ -1,0 +1,67 @@
+{
+  "_comment": "Quark CLI 配置文件模板 — 复制到 ~/.quark-cli/config.json 并修改",
+
+  "cookie": [
+    "请替换为你的夸克网盘 Cookie"
+  ],
+
+  "search_sources": {
+    "pansou": "https://www.pansou.com"
+  },
+
+  "media": {
+    "provider": "fnos",
+    "fnos": {
+      "host": "",
+      "port": 8080,
+      "username": "",
+      "password": "",
+      "token": ""
+    },
+    "discovery": {
+      "tmdb_api_key": "",
+      "language": "zh-CN",
+      "region": "CN"
+    }
+  },
+
+  "sync": {
+    "webdav_mount": "/mnt/alist/夸克",
+    "local_dest": "/mnt/nas/media",
+    "delete_after_sync": false,
+    "buffer_size": 8388608,
+    "exclude_patterns": ["*.nfo", "*.txt", "*.jpg", "*.png"]
+  },
+
+  "bot": {
+    "feishu": {
+      "app_id": "",
+      "app_secret": "",
+      "notify_open_id": "",
+      "api_base": "https://open.feishu.cn",
+      "base_path": "/媒体"
+    }
+  },
+
+  "scheduler": {
+    "tasks": [
+      {
+        "name": "每日随机电影",
+        "enabled": false,
+        "interval_minutes": 360,
+        "media_type": "movie",
+        "count": 3,
+        "filters": {
+          "min_rating": 7.0
+        },
+        "save_base_path": "/媒体/电影",
+        "check_media_lib": true,
+        "bot_notify": true,
+        "sync": {
+          "enabled": false,
+          "delete_after_sync": false
+        }
+      }
+    ]
+  }
+}

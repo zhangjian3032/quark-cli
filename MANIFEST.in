@@ -1,0 +1,15 @@
+# 包含前端构建产物
+recursive-include quark_cli/web/static *
+
+# 包含配置/文档
+include LICENSE
+include README.md
+include pyproject.toml
+
+# 排除开发文件
+prune web
+prune tests
+prune patches
+prune .github
+exclude .gitignore
+exclude .editorconfig

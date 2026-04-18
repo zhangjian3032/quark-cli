@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  quark-cli:
+    build: .
+    image: quark-cli:latest
+    container_name: quark-cli
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      # 配置持久化
+      - ./data/config:/root/.quark-cli
+      # WebDAV 挂载 (Alist 挂载的夸克网盘)
+      - /mnt/alist:/mnt/alist:ro
+      # NAS 本地存储
+      - /mnt/nas/media:/mnt/nas/media
+    environment:
+      - TZ=Asia/Shanghai
+      # 可选: 飞书机器人
+      # - FEISHU_APP_ID=cli_xxx
+      # - FEISHU_APP_SECRET=xxx
+      # - FEISHU_NOTIFY_OPEN_ID=ou_xxx
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:9090/api/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
