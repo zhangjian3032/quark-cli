@@ -11,6 +11,8 @@ WebDAV 挂载目录 → 本地 NAS 同步引擎
     - 断点续传 (比较文件大小)
     - 增量同步 (跳过已存在且大小一致的文件)
     - 每任务可配置是否删除源文件
+    - 临时文件拷贝 (.quark_tmp 后缀, 完成后 rename)
+    - 每任务独立调度间隔
 
 配置 (config.json → sync 或 scheduler.tasks[].sync):
   {
@@ -36,6 +38,9 @@ logger = logging.getLogger("quark_cli.sync")
 
 # 默认 8MB 缓冲区 — WebDAV 挂载通常 FUSE 有延迟，大缓冲区更高效
 DEFAULT_BUFFER_SIZE = 8 * 1024 * 1024
+
+# 临时文件后缀 — 拷贝过程中使用，完成后 rename 去掉
+TEMP_SUFFIX = ".quark_tmp"
 
 # ── 进度数据结构 ──
 
@@ -257,6 +262,10 @@ class SyncEngine:
                 if fname.startswith("."):
                     continue
 
+                # 跳过临时文件 (上次未完成的拷贝残留)
+                if fname.endswith(TEMP_SUFFIX):
+                    continue
+
                 # 排除模式
                 if self._is_excluded(fname):
                     continue
@@ -284,6 +293,14 @@ class SyncEngine:
           - 目标存在且大小一致 → 跳过
         """
         if not os.path.exists(dst_path):
+            # 清理可能残留的 .quark_tmp 临时文件
+            tmp_path = dst_path + TEMP_SUFFIX
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                    logger.debug("清理残留临时文件: %s", tmp_path)
+                except OSError:
+                    pass
             return True
         try:
             dst_size = os.path.getsize(dst_path)
@@ -295,7 +312,8 @@ class SyncEngine:
         """
         带进度回调的文件拷贝
 
-        采用手动分块读写而非 shutil.copy2，以支持实时进度报告。
+        先写入 dst_path + ".quark_tmp" 临时文件，完成后 rename 为正式文件。
+        这样可以通过后缀识别不完整的文件。
         """
         fp = FileProgress(
             src=src_path,
@@ -311,10 +329,13 @@ class SyncEngine:
         # 确保目标目录存在
         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
+        # 临时文件路径
+        tmp_path = dst_path + TEMP_SUFFIX
+
         copy_start = time.time()
 
         try:
-            with open(src_path, "rb") as fsrc, open(dst_path, "wb") as fdst:
+            with open(src_path, "rb") as fsrc, open(tmp_path, "wb") as fdst:
                 copied = 0
                 last_report = copy_start
 
@@ -322,6 +343,11 @@ class SyncEngine:
                     if self._cancelled:
                         fp.status = "error"
                         fp.error = "cancelled"
+                        # 取消时清理临时文件
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
                         return fp
 
                     chunk = fsrc.read(self.buffer_size)
@@ -350,7 +376,11 @@ class SyncEngine:
                         self._notify()
                         last_report = now
 
-            # 复制完成 — 保留修改时间
+            # 写入完成 — 将临时文件 rename 为正式文件
+            # rename 是原子操作 (同文件系统), 确保目标文件要么完整要么不存在
+            os.rename(tmp_path, dst_path)
+
+            # 保留修改时间
             try:
                 st = os.stat(src_path)
                 os.utime(dst_path, (st.st_atime, st.st_mtime))
@@ -365,10 +395,10 @@ class SyncEngine:
             fp.status = "error"
             fp.error = str(e)
             logger.error("同步失败: %s — %s", fp.filename, e)
-            # 删除不完整的目标文件
+            # 删除不完整的临时文件
             try:
-                if os.path.exists(dst_path):
-                    os.remove(dst_path)
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
             except OSError:
                 pass
 
@@ -737,15 +767,23 @@ def sync_from_config(config_data: dict, task_config: Optional[dict] = None,
 
 class SyncScheduler:
     """
-    独立的同步定时调度器
+    独立的同步定时调度器 — 支持每任务独立调度间隔
 
     配置 (config.json → sync):
       {
         "schedule_enabled": true,
-        "schedule_interval_minutes": 60,
-        "schedule_cron": "",
+        "schedule_interval_minutes": 60,     // 全局默认间隔 (向后兼容)
         "bot_notify": true,
-        ...
+        "tasks": [
+          {
+            "name": "media",
+            "source": "/mnt/alist/media",
+            "dest": "/mnt/nas/media",
+            "enabled": true,
+            "interval_minutes": 30,          // 任务级独立间隔 (可选)
+            ...
+          }
+        ]
       }
     """
 
@@ -753,10 +791,12 @@ class SyncScheduler:
         self.config_path = config_path
         self._running = False
         self._thread = None
-        self._interval = 3600  # 默认 1 小时
+        self._interval = 3600  # 全局默认间隔 (秒)
         self._enabled = False
         self._bot_notify = False
         self._last_run = None
+        # 每任务独立的上次执行时间
+        self._task_last_run: Dict[str, float] = {}  # task_name → timestamp
 
     def reload(self, sync_config: dict):
         """重新加载配置"""
@@ -791,10 +831,16 @@ class SyncScheduler:
         except Exception:
             return None
 
+    def _get_task_interval(self, task_def: dict) -> int:
+        """获取任务的调度间隔 (秒), 优先使用任务级配置, 否则用全局默认"""
+        task_minutes = task_def.get("interval_minutes", 0)
+        if task_minutes and int(task_minutes) > 0:
+            return max(int(task_minutes) * 60, 300)  # 最小 5 分钟
+        return self._interval
+
     def _loop(self):
-        """调度主循环"""
+        """调度主循环 — 每任务独立间隔"""
         import time as _time
-        from datetime import datetime
 
         _time.sleep(60)  # 启动后等 60 秒
 
@@ -803,41 +849,54 @@ class SyncScheduler:
                 cfg = self._load_config()
 
                 if self._enabled and cfg:
-                    now = datetime.now()
-                    if (not self._last_run or
-                            (now - self._last_run).total_seconds() >= self._interval):
-                        self._last_run = now
-                        self._execute_sync(cfg)
+                    now = _time.time()
+                    sync_cfg = cfg.data.get("sync", {})
+                    tasks_list = sync_cfg.get("tasks", [])
+
+                    # 兼容旧配置: 无 tasks 时走旧的单任务逻辑
+                    if not tasks_list:
+                        webdav = sync_cfg.get("webdav_mount", "")
+                        local = sync_cfg.get("local_dest", "")
+                        if webdav and local:
+                            tasks_list = [{
+                                "name": "default",
+                                "source": webdav,
+                                "dest": local,
+                                "delete_after_sync": sync_cfg.get("delete_after_sync", False),
+                                "enabled": True,
+                            }]
+
+                    # 逐个任务检查是否到时间
+                    due_tasks = []
+                    for task_def in tasks_list:
+                        if not task_def.get("enabled", True):
+                            continue
+                        src = task_def.get("source", "")
+                        dst = task_def.get("dest", "")
+                        if not src or not dst:
+                            continue
+
+                        tname = task_def.get("name", "sync")
+                        interval = self._get_task_interval(task_def)
+                        last = self._task_last_run.get(tname, 0)
+
+                        if now - last >= interval:
+                            due_tasks.append(task_def)
+
+                    if due_tasks:
+                        self._execute_sync_tasks(cfg, due_tasks)
 
             except Exception:
                 logger.exception("同步调度循环异常")
 
             _time.sleep(60)
 
-    def _execute_sync(self, cfg):
-        """执行一次同步 — 支持多任务并行"""
+    def _execute_sync_tasks(self, cfg, tasks_to_run):
+        """执行到期的同步任务"""
+        import time as _time
         sync_cfg = cfg.data.get("sync", {})
-        tasks_list = sync_cfg.get("tasks", [])
 
-        # 兼容旧配置: 无 tasks 时走旧的单任务逻辑
-        if not tasks_list:
-            webdav = sync_cfg.get("webdav_mount", "")
-            local = sync_cfg.get("local_dest", "")
-            if webdav and local:
-                tasks_list = [{
-                    "name": "default",
-                    "source": webdav,
-                    "dest": local,
-                    "delete_after_sync": sync_cfg.get("delete_after_sync", False),
-                    "enabled": True,
-                }]
-
-        enabled_tasks = [t for t in tasks_list if t.get("enabled", True)]
-        if not enabled_tasks:
-            logger.info("定时同步: 无可用任务")
-            return
-
-        logger.info("定时同步: 启动 %d 个任务", len(enabled_tasks))
+        logger.info("定时同步: 启动 %d 个任务", len(tasks_to_run))
 
         results = []
         threads = []
@@ -849,6 +908,9 @@ class SyncScheduler:
             if not src or not dst:
                 return
             try:
+                # 记录本次执行时间
+                self._task_last_run[name] = _time.time()
+
                 result = sync_files(
                     source_dir=src,
                     dest_dir=dst,
@@ -865,7 +927,6 @@ class SyncScheduler:
                 try:
                     from quark_cli.history import record as history_record
                     h_status = "success" if result.error_files == 0 else "partial"
-                    # 收集已拷贝的文件名
                     copied_names = [fp.filename for fp in result.files if fp.status == "done"]
                     file_hint = ""
                     if copied_names:
@@ -899,7 +960,7 @@ class SyncScheduler:
                 except Exception:
                     pass
 
-        for task_def in enabled_tasks:
+        for task_def in tasks_to_run:
             t = threading.Thread(target=_run_one, args=(task_def,),
                                  daemon=True,
                                  name="sched-sync-{}".format(task_def.get("name", "")))
@@ -914,6 +975,31 @@ class SyncScheduler:
         if self._bot_notify and results:
             self._send_notify_multi(cfg, results)
 
+    def _execute_sync(self, cfg):
+        """执行一次同步 — 所有 enabled 任务 (兼容旧调用)"""
+        sync_cfg = cfg.data.get("sync", {})
+        tasks_list = sync_cfg.get("tasks", [])
+
+        # 兼容旧配置
+        if not tasks_list:
+            webdav = sync_cfg.get("webdav_mount", "")
+            local = sync_cfg.get("local_dest", "")
+            if webdav and local:
+                tasks_list = [{
+                    "name": "default",
+                    "source": webdav,
+                    "dest": local,
+                    "delete_after_sync": sync_cfg.get("delete_after_sync", False),
+                    "enabled": True,
+                }]
+
+        enabled_tasks = [t for t in tasks_list if t.get("enabled", True)]
+        if not enabled_tasks:
+            logger.info("定时同步: 无可用任务")
+            return
+
+        self._execute_sync_tasks(cfg, enabled_tasks)
+
     def _send_notify(self, cfg, progress):
         """发送飞书 Bot 通知"""
         try:
@@ -926,7 +1012,6 @@ class SyncScheduler:
             }
 
             if progress.status == "done" and progress.copied_files > 0:
-                # 收集已拷贝的文件名列表
                 filenames = [fp.filename for fp in progress.files if fp.status == "done"]
                 result["saved"] = [{
                     "title": "文件同步",
@@ -936,13 +1021,9 @@ class SyncScheduler:
                     "filenames": filenames,
                 }]
             elif progress.error_files > 0 or progress.status == "error":
-                result["failed"] = [{
-                    "title": "文件同步",
-                    "year": "",
-                    "error": "; ".join(progress.errors[:3]) if progress.errors else "未知错误",
-                }]
+                result["failed"] = [{"title": "文件同步", "year": "",
+                                     "error": "; ".join(progress.errors[:3]) if progress.errors else "未知错误"}]
             else:
-                # 全部跳过，无新文件，不通知
                 return
 
             config_path = str(cfg.config_path) if hasattr(cfg, 'config_path') else self.config_path
@@ -976,7 +1057,7 @@ class SyncScheduler:
                     })
 
             if not saved_items and not failed_items:
-                return  # 全部跳过, 不通知
+                return
 
             result = {
                 "task_name": "定时文件同步 ({} 任务)".format(len(results)),
@@ -997,6 +1078,10 @@ class SyncScheduler:
             "interval_minutes": self._interval // 60,
             "bot_notify": self._bot_notify,
             "last_run": self._last_run.isoformat() if self._last_run else None,
+            "task_last_run": {
+                name: time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ts))
+                for name, ts in self._task_last_run.items()
+            },
         }
 
 

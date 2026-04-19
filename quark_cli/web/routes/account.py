@@ -443,6 +443,41 @@ def _deep_merge(base: dict, override: dict):
             base[key] = val
 
 
+# ── 自动转存配置 ──
+
+@router.get("/config/autosave")
+def config_autosave_read():
+    """读取自动转存配置"""
+    from quark_cli.web.deps import get_config
+    cfg = get_config()
+    cfg.load()
+    autosave_cfg = cfg.data.get("autosave", {})
+    return {
+        "flat_save_path": autosave_cfg.get("flat_save_path", False),
+        "base_path": autosave_cfg.get("base_path", "/媒体"),
+    }
+
+
+@router.put("/config/autosave")
+def config_autosave_update(data: dict = Body(...)):
+    """更新自动转存配置"""
+    from quark_cli.web.deps import get_config
+    cfg = get_config()
+    cfg.load()
+
+    autosave_cfg = cfg._data.get("autosave", {})
+
+    if "flat_save_path" in data:
+        autosave_cfg["flat_save_path"] = bool(data["flat_save_path"])
+    if "base_path" in data:
+        autosave_cfg["base_path"] = str(data["base_path"]).strip() or "/媒体"
+
+    cfg._data["autosave"] = autosave_cfg
+    cfg.save()
+
+    return {"status": "saved", **autosave_cfg}
+
+
 # ── Cookie 保活 ──
 
 @router.get("/keepalive/status")

@@ -193,6 +193,9 @@ def batch_save(data: dict = Body(...)):
     cfg = ConfigManager(config_path)
     cfg.load()
 
+    # 读取平铺路径配置
+    flat_save_path = cfg.data.get("autosave", {}).get("flat_save_path", False)
+
     search_engine = PanSearch(config=cfg)
 
     # TMDB 源 (可选)
@@ -231,15 +234,18 @@ def batch_save(data: dict = Body(...)):
                     first = sr.items[0]
                     detail = tmdb_source.get_detail(first.source_id, media_type)
                     keywords = suggest_search_keywords(detail)
-                    paths = suggest_save_path(detail, base_path=base_path)
+                    paths = suggest_save_path(detail, base_path=base_path, flat=flat_save_path)
                     if paths:
                         save_path = paths[0]["path"]
             except Exception:
                 pass
 
         if not save_path:
-            type_folder = "电影" if media_type == "movie" else "剧集"
-            save_path = "/{}/{}/{}".format(base_path.strip("/"), type_folder, name)
+            if flat_save_path:
+                save_path = "/{}/{}".format(base_path.strip("/"), name)
+            else:
+                type_folder = "电影" if media_type == "movie" else "剧集"
+                save_path = "/{}/{}/{}".format(base_path.strip("/"), type_folder, name)
 
         if dry_run:
             all_results = []

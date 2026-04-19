@@ -90,11 +90,16 @@ def suggest_search_keywords(item):
     return result
 
 
-def suggest_save_path(item, base_path="/媒体"):
-    # type: (..., str) -> list
+def suggest_save_path(item, base_path="/媒体", flat=False):
+    # type: (..., str, bool) -> list
     """
     根据 DiscoveryItem 生成标准保存路径建议列表。
     遵循 Plex / Emby 命名规范。
+
+    Args:
+        item: DiscoveryItem 元数据
+        base_path: 保存根路径
+        flat: 平铺模式 — 不加 电影/剧集 类型前缀，所有内容直接放在 base_path 下
 
     返回 list[dict]，每个元素:
     {
@@ -104,8 +109,11 @@ def suggest_save_path(item, base_path="/媒体"):
     }
 
     路径结构:
-      电影: /{base}/电影/{类型}/{标题} ({年份})
-      剧集: /{base}/剧集/{类型}/{标题} ({年份})
+      标准模式:
+        电影: /{base}/电影/{类型}/{标题} ({年份})
+        剧集: /{base}/剧集/{类型}/{标题} ({年份})
+      平铺模式:
+        /{base}/{标题} ({年份})
     """
     title = _sanitize(item.title or item.original_title or "Unknown")
     year = (item.year or "").strip()
@@ -123,39 +131,60 @@ def suggest_save_path(item, base_path="/媒体"):
 
     suggestions = []
 
-    # Style 1: 带类型分类
-    path1 = "/{}/{}/{}/{}".format(
-        base_path.strip("/"), type_folder, primary_genre, title_folder
-    )
-    suggestions.append({
-        "path": path1,
-        "style": "categorized",
-        "description": "按类型分类: /{}/{}/{}".format(type_folder, primary_genre, title_folder),
-    })
+    if flat:
+        # 平铺模式: 不加类型前缀
+        path_flat = "/{}/{}".format(base_path.strip("/"), title_folder)
+        suggestions.append({
+            "path": path_flat,
+            "style": "flat",
+            "description": "平铺路径: /{}".format(title_folder),
+        })
 
-    # Style 2: 简洁 (不带类型分类)
-    path2 = "/{}/{}/{}".format(
-        base_path.strip("/"), type_folder, title_folder
-    )
-    suggestions.append({
-        "path": path2,
-        "style": "simple",
-        "description": "简洁路径: /{}/{}".format(type_folder, title_folder),
-    })
-
-    # Style 3: 英文原名 (如果有)
-    original = (item.original_title or "").strip()
-    if original and original != item.title:
-        original_safe = _sanitize(original)
-        title_folder_en = "{} ({})".format(original_safe, year) if year else original_safe
-        path3 = "/{}/{}/{}".format(
-            base_path.strip("/"), type_folder, title_folder_en
+        # 英文原名 (如果有)
+        original = (item.original_title or "").strip()
+        if original and original != item.title:
+            original_safe = _sanitize(original)
+            title_folder_en = "{} ({})".format(original_safe, year) if year else original_safe
+            path_flat_en = "/{}/{}".format(base_path.strip("/"), title_folder_en)
+            suggestions.append({
+                "path": path_flat_en,
+                "style": "flat_english",
+                "description": "平铺英文: /{}".format(title_folder_en),
+            })
+    else:
+        # Style 1: 带类型分类
+        path1 = "/{}/{}/{}/{}".format(
+            base_path.strip("/"), type_folder, primary_genre, title_folder
         )
         suggestions.append({
-            "path": path3,
-            "style": "english",
-            "description": "英文命名: /{}/{}".format(type_folder, title_folder_en),
+            "path": path1,
+            "style": "categorized",
+            "description": "按类型分类: /{}/{}/{}".format(type_folder, primary_genre, title_folder),
         })
+
+        # Style 2: 简洁 (不带类型分类)
+        path2 = "/{}/{}/{}".format(
+            base_path.strip("/"), type_folder, title_folder
+        )
+        suggestions.append({
+            "path": path2,
+            "style": "simple",
+            "description": "简洁路径: /{}/{}".format(type_folder, title_folder),
+        })
+
+        # Style 3: 英文原名 (如果有)
+        original = (item.original_title or "").strip()
+        if original and original != item.title:
+            original_safe = _sanitize(original)
+            title_folder_en = "{} ({})".format(original_safe, year) if year else original_safe
+            path3 = "/{}/{}/{}".format(
+                base_path.strip("/"), type_folder, title_folder_en
+            )
+            suggestions.append({
+                "path": path3,
+                "style": "english",
+                "description": "英文命名: /{}/{}".format(type_folder, title_folder_en),
+            })
 
     return suggestions
 

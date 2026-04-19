@@ -54,6 +54,8 @@ export const configApi = {
   import:       (data)                    => post('/config/import', data),
   readProxy:    ()                        => request('/config/proxy'),
   setProxy:     (data)                    => put('/config/proxy', data),
+  readAutoSave: ()                        => request('/config/autosave'),
+  setAutoSave:  (data)                    => put('/config/autosave', data),
 }
 
 // ── Drive (网盘文件) ──

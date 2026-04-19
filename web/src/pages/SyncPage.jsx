@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   RefreshCw, Play, Square, Settings, Folder, FolderOpen, ArrowRight,
   Trash2, CheckCircle, AlertCircle, Loader2, Download, ChevronRight,
-  ChevronUp, Timer, Bell, BellOff, X, Plus, Copy, Power, PowerOff,
+  ChevronUp, Timer, Bell, BellOff, X, Plus, Copy, Power, PowerOff, Clock,
 } from 'lucide-react'
 
 const API = '/api'
@@ -225,12 +225,31 @@ function SyncTaskCard({ task, index, onChange, onRemove, onDuplicate }) {
         </div>
       </div>
 
-      <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
-        <input type="checkbox" checked={task.delete_after_sync || false}
-          onChange={e => onChange({ ...task, delete_after_sync: e.target.checked })}
-          className="rounded" />
-        <Trash2 className="w-3 h-3" /> 同步后删除源文件
-      </label>
+      <div className="flex items-center gap-4 flex-wrap">
+        <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
+          <input type="checkbox" checked={task.delete_after_sync || false}
+            onChange={e => onChange({ ...task, delete_after_sync: e.target.checked })}
+            className="rounded" />
+          <Trash2 className="w-3 h-3" /> 同步后删除源文件
+        </label>
+        <div className="flex items-center gap-2 text-xs text-gray-500">
+          <Clock className="w-3 h-3" />
+          <span>独立间隔:</span>
+          <select value={task.interval_minutes || ''}
+            onChange={e => onChange({ ...task, interval_minutes: e.target.value ? Number(e.target.value) : undefined })}
+            className="bg-surface-2 border border-surface-3 rounded px-2 py-0.5 text-xs outline-none focus:border-brand-500">
+            <option value="">跟随全局</option>
+            <option value={5}>5 分钟</option>
+            <option value={15}>15 分钟</option>
+            <option value={30}>30 分钟</option>
+            <option value={60}>1 小时</option>
+            <option value={120}>2 小时</option>
+            <option value={360}>6 小时</option>
+            <option value={720}>12 小时</option>
+            <option value={1440}>每天</option>
+          </select>
+        </div>
+      </div>
     </div>
   )
 }
@@ -525,6 +544,9 @@ export default function SyncPage() {
               <span className="text-gray-400 truncate max-w-[200px]">{t.dest}</span>
               {t.delete_after_sync && (
                 <span className="text-[10px] text-yellow-500 flex items-center gap-0.5"><Trash2 className="w-3 h-3" />删除源</span>
+              )}
+              {t.interval_minutes > 0 && (
+                <span className="text-[10px] text-cyan-400 flex items-center gap-0.5"><Clock className="w-3 h-3" />{t.interval_minutes}m</span>
               )}
               {/* 单个任务启动按钮 */}
               <button onClick={() => handleStartOne(t.name)}

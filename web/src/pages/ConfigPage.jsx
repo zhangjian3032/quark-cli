@@ -4,7 +4,7 @@ import {
   Shield, Loader2, Sparkles, Calendar, TrendingUp,
   Settings, Cookie, Server, Film, Save, Trash2, Plus,
   Eye, EyeOff, RefreshCw, AlertCircle, FileText, MessageSquare, Bot,
-  Download, Upload, Globe,
+  Download, Upload, Globe, FolderSync,
 } from 'lucide-react'
 import { accountApi, configApi } from '../api/client'
 import { PageSpinner, ErrorBanner, PageHeader } from '../components/UI'
@@ -836,6 +836,103 @@ function ProxySection({ config, onRefresh }) {
   )
 }
 
+
+/* ════════════════════════════════════════════════
+   Section: 自动转存路径配置
+   ════════════════════════════════════════════════ */
+function AutoSaveSection({ onRefresh }) {
+  const [form, setForm] = useState({ flat_save_path: false, base_path: '/媒体' })
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    configApi.readAutoSave()
+      .then(d => {
+        setForm({ flat_save_path: d.flat_save_path || false, base_path: d.base_path || '/媒体' })
+        setLoading(false)
+      })
+      .catch(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setToast(null)
+    try {
+      await configApi.setAutoSave(form)
+      setToast({ msg: '配置已保存', type: 'success' })
+      onRefresh()
+    } catch (e) {
+      setToast({ msg: e.message, type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls = "w-full bg-surface-2 border border-surface-3 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500"
+
+  return (
+    <div className="card p-6 mb-6">
+      <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+        <FolderSync size={20} className="text-teal-400" /> 自动转存路径
+      </h3>
+
+      {loading ? (
+        <div className="h-16 bg-surface-3 rounded-lg animate-pulse" />
+      ) : (
+        <>
+          <div className="space-y-4 mb-4">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">转存基准路径</label>
+              <input value={form.base_path}
+                onChange={e => setForm(f => ({ ...f, base_path: e.target.value }))}
+                placeholder="/媒体"
+                className={inputCls} />
+              <div className="text-[10px] text-gray-600 mt-1">
+                所有自动转存的影视文件将保存在此根路径下
+              </div>
+            </div>
+
+            <label className="flex items-start gap-3 p-3 bg-surface-2 rounded-lg cursor-pointer hover:bg-surface-3 transition">
+              <input type="checkbox" checked={form.flat_save_path}
+                onChange={e => setForm(f => ({ ...f, flat_save_path: e.target.checked }))}
+                className="w-4 h-4 rounded bg-surface-2 border-surface-3 text-brand-500 focus:ring-brand-500 mt-0.5" />
+              <div>
+                <div className="text-sm text-gray-300 font-medium">平铺路径模式</div>
+                <div className="text-[10px] text-gray-500 mt-1">
+                  {form.flat_save_path ? (
+                    <>
+                      <span className="text-brand-400">当前: 平铺</span> — 所有内容直接放在基准路径下，如 <code className="text-gray-400">/媒体/流浪地球2 (2023)</code>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-gray-400">当前: 分类</span> — 按类型分目录，如 <code className="text-gray-400">/媒体/电影/科幻/流浪地球2 (2023)</code>
+                    </>
+                  )}
+                </div>
+                <div className="text-[10px] text-gray-600 mt-1">
+                  平铺模式更适合配合文件同步使用，管理路径更简单
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button onClick={handleSave} disabled={saving}
+              className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-surface-3 disabled:text-gray-600
+                         text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+              {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              保存配置
+            </button>
+            <Toast msg={toast?.msg} type={toast?.type} />
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+
 /* ════════════════════════════════════════════════
    Section: 配置导出 / 导入
    ════════════════════════════════════════════════ */
@@ -976,6 +1073,9 @@ export default function ConfigPage() {
 
       {/* 代理配置 */}
       <ProxySection config={config} onRefresh={loadConfig} />
+
+      {/* 自动转存路径 */}
+      <AutoSaveSection onRefresh={loadConfig} />
 
       {/* 飞书机器人 */}
       <FeishuBotSection onRefresh={loadConfig} />

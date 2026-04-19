@@ -11,7 +11,7 @@ class DiscoveryService:
     def source_name(self):
         return self._source.source_name
 
-    def meta_search(self, query, media_type="movie", year=None, base_path="/媒体"):
+    def meta_search(self, query, media_type="movie", year=None, base_path="/媒体", flat=False):
         """按关键词搜索元数据，返回完整详情 + 建议"""
         from quark_cli.media.discovery.naming import (
             suggest_search_keywords, suggest_save_path, format_meta_summary,
@@ -41,7 +41,7 @@ class DiscoveryService:
                 pass
 
         keywords = suggest_search_keywords(item)
-        paths = suggest_save_path(item, base_path=base_path)
+        paths = suggest_save_path(item, base_path=base_path, flat=flat)
         summary = format_meta_summary(item)
 
         if item.poster_path:
@@ -71,7 +71,7 @@ class DiscoveryService:
             "other_results": other_results,
         }
 
-    def meta_by_id(self, source_id, media_type="movie", base_path="/媒体"):
+    def meta_by_id(self, source_id, media_type="movie", base_path="/媒体", flat=False):
         """通过 source_id 获取详情 (兼容 tmdb_id / douban_id)"""
         from quark_cli.media.discovery.naming import (
             suggest_search_keywords, suggest_save_path, format_meta_summary,
@@ -86,7 +86,7 @@ class DiscoveryService:
                 pass
 
         keywords = suggest_search_keywords(item)
-        paths = suggest_save_path(item, base_path=base_path)
+        paths = suggest_save_path(item, base_path=base_path, flat=flat)
         summary = format_meta_summary(item)
 
         if item.poster_path:
@@ -106,8 +106,8 @@ class DiscoveryService:
         }
 
     # 保持向后兼容
-    def meta_by_tmdb_id(self, tmdb_id, media_type="movie", base_path="/媒体"):
-        return self.meta_by_id(tmdb_id, media_type, base_path)
+    def meta_by_tmdb_id(self, tmdb_id, media_type="movie", base_path="/媒体", flat=False):
+        return self.meta_by_id(tmdb_id, media_type, base_path, flat=flat)
 
     def discover(self, list_type="top_rated", media_type="movie", page=1,
                  min_rating=None, genre=None, year=None, country=None,
