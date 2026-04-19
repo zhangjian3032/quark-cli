@@ -444,22 +444,10 @@ class SyncEngine:
                         sum(f.size for f in self._progress.files
                             if f.status in ("done", "skipped"))
                     )
-            elif fp.status == "error":
-                self._progress.error_files += 1
-                self._progress.errors.append(
-                    "{}: {}".format(fp.filename, fp.error)
-                )
 
-            self._progress.current_file = None
-            self._notify()
-
-        # ── Step 3: 删除源文件 (可选) ──
-        if self.delete_after_sync and not self._cancelled:
-            self._progress.status = "deleting"
-            self._notify()
-
-            for fp in self._progress.files:
-                if fp.status == "done":
+                # 即时删除: 每个文件拷贝成功后立即删除源文件
+                # 影视文件通常很大, 等全部拷完再删会长时间占用双倍空间
+                if self.delete_after_sync:
                     try:
                         os.remove(fp.src)
                         self._progress.deleted_files += 1
@@ -470,7 +458,21 @@ class SyncEngine:
                             "删除失败 {}: {}".format(fp.filename, e)
                         )
 
-            # 清理空目录 (从深到浅)
+            elif fp.status == "error":
+                self._progress.error_files += 1
+                self._progress.errors.append(
+                    "{}: {}".format(fp.filename, fp.error)
+                )
+
+            self._progress.current_file = None
+            self._notify()
+
+        # ── Step 3: 清理空目录 ──
+        if self.delete_after_sync and not self._cancelled:
+            self._progress.status = "deleting"
+            self._notify()
+
+            # 源文件已在 Step 2 中逐个删除, 这里只清理残留空目录
             self._cleanup_empty_dirs()
 
         # ── 完成 ──
