@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
-import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History, Menu, X, Tv } from 'lucide-react'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History, Menu, X, Tv, Rss } from 'lucide-react'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
 import LibraryPage from './pages/LibraryPage'
@@ -14,6 +14,7 @@ import TmdbDetailPage from './pages/TmdbDetailPage'
 import SchedulerPage from './pages/SchedulerPage'
 import SyncPage from './pages/SyncPage'
 import SubscriptionPage from './pages/SubscriptionPage'
+import RssPage from './pages/RssPage'
 
 const NAV_SECTIONS = [
   {
@@ -44,6 +45,7 @@ const NAV_SECTIONS = [
     items: [
       { to: '/scheduler',     icon: CalendarClock, label: '定时任务' },
       { to: '/subscriptions', icon: Tv,            label: '订阅追剧' },
+      { to: '/rss',           icon: Rss,           label: 'RSS 订阅' },
       { to: '/sync',          icon: FolderSync,    label: '文件同步' },
     ],
   },
@@ -169,6 +171,7 @@ export default function App() {
             <Route path="/resource-search" element={<ResourceSearchPage />} />
             <Route path="/scheduler" element={<SchedulerPage />} />
             <Route path="/subscriptions" element={<SubscriptionPage />} />
+            <Route path="/rss" element={<RssPage />} />
             <Route path="/sync" element={<SyncPage />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
