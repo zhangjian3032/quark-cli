@@ -6,7 +6,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Star, Calendar, Clock, Film, Tv, Users, FolderOpen,
-  Search, Copy, Download, ArrowRight, ExternalLink, Tag,
+  Search, Copy, Download, ArrowLeft, ArrowRight, ExternalLink, Tag,
   CheckCircle2, Sparkles, Zap,
 } from 'lucide-react'
 import { discoveryApi } from '../api/client'
@@ -53,7 +53,13 @@ export default function TmdbDetailPage() {
 
   return (
     <>
-      <PageHeader title="影片详情" />
+      <PageHeader title="影片详情">
+        <button onClick={() => navigate(-1)}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-400 hover:text-white
+                     bg-surface-2 hover:bg-surface-3 rounded-lg transition-colors">
+          <ArrowLeft size={16} /> 返回
+        </button>
+      </PageHeader>
 
       {/* Hero card */}
       <div className="card overflow-hidden mb-6">
