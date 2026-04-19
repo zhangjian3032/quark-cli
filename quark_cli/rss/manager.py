@@ -180,6 +180,19 @@ class RssManager:
         cfg._data["rss_feeds"] = feeds
         cfg.save()
 
+    def _get_proxy(self, cfg=None):
+        """获取 RSS 代理配置, 若未启用则返回 None"""
+        if cfg is None:
+            cfg = self._load_config()
+        proxy_cfg = cfg.data.get("proxy", {})
+        proxy_url = proxy_cfg.get("url", "").strip()
+        if not proxy_url:
+            return None
+        targets = proxy_cfg.get("targets", [])
+        if "rss" in targets:
+            return proxy_url
+        return None
+
     # ── 列表 ──
 
     def list_feeds(self):
@@ -342,6 +355,7 @@ class RssManager:
                 auth=feed.get("auth"),
                 etag=feed.get("etag", ""),
                 last_modified=feed.get("last_modified", ""),
+                proxy=self._get_proxy(),
             )
         except FetchError as e:
             result["error"] = str(e)
@@ -457,7 +471,7 @@ class RssManager:
             dict: {feed_title, feed_link, items: [...]}
         """
         try:
-            feed_result = fetch_feed(feed_url, auth=auth)
+            feed_result = fetch_feed(feed_url, auth=auth, proxy=self._get_proxy())
         except FetchError as e:
             return {"error": str(e)}
 

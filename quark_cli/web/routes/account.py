@@ -1,6 +1,6 @@
 """账号 + 配置管理 API 路由"""
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from pydantic import BaseModel
 from typing import Optional
 
@@ -96,15 +96,69 @@ def config_read():
             "region": disc.get("region", "CN"),
         }
 
+        # Proxy 配置
+        proxy_cfg = data.get("proxy", {})
+        proxy = {
+            "url": proxy_cfg.get("url", ""),
+            "targets": proxy_cfg.get("targets", []),
+        }
+
         return {
             "cookies": cookies,
             "cookie_count": len([c for c in (data.get("cookie", []) if isinstance(data.get("cookie", []), list) else []) if c]),
             "fnos": fnos,
             "tmdb": tmdb,
+            "proxy": proxy,
             "config_path": cfg.get_config_path(),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Proxy 配置 ──
+
+@router.get("/config/proxy")
+def config_proxy_read():
+    """读取代理配置"""
+    from quark_cli.web.deps import get_config
+    cfg = get_config()
+    cfg.load()
+    proxy_cfg = cfg.data.get("proxy", {})
+    return {
+        "url": proxy_cfg.get("url", ""),
+        "targets": proxy_cfg.get("targets", []),
+    }
+
+
+@router.put("/config/proxy")
+def config_proxy_update(data: dict = Body(...)):
+    """更新代理配置"""
+    from quark_cli.web.deps import get_config, set_config_path, get_config_path
+    cfg = get_config()
+    cfg.load()
+
+    proxy_url = data.get("url", "").strip()
+    targets = data.get("targets", [])
+
+    # 验证 targets
+    valid_targets = {"tmdb", "douban", "rss"}
+    targets = [t for t in targets if t in valid_targets]
+
+    # 验证 proxy URL 格式
+    if proxy_url and not proxy_url.startswith(("http://", "https://", "socks5://", "socks4://")):
+        raise HTTPException(status_code=400, detail="代理地址需以 http://, https://, socks5://, socks4:// 开头")
+
+    cfg._data["proxy"] = {
+        "url": proxy_url,
+        "targets": targets,
+    }
+    cfg.save()
+
+    # 清除缓存以便下次请求使用新代理
+    config_path = get_config_path()
+    set_config_path(config_path)
+
+    return {"status": "saved", "url": proxy_url, "targets": targets}
 
 
 class CookieSetBody(BaseModel):

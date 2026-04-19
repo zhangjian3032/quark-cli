@@ -269,9 +269,11 @@ def _parse_web_browse_item(raw, media_type="movie"):
 class DoubanSource(DiscoverySource):
     """豆瓣数据源"""
 
-    def __init__(self, timeout=15):
+    def __init__(self, timeout=15, proxy=None):
         self._timeout = timeout
         self._session = requests.Session()
+        if proxy:
+            self._session.proxies = {"http": proxy, "https": proxy}
         self._frodo_headers = {
             "User-Agent": _FRODO_UA,
             "Referer": _FRODO_REFERER,

@@ -100,8 +100,8 @@ def _parse_item(raw, media_type="movie"):
 class TmdbSource(DiscoverySource):
     """TMDB 数据源"""
 
-    def __init__(self, api_key, language="zh-CN", region="CN", timeout=15):
-        # type: (str, str, str, int) -> None
+    def __init__(self, api_key, language="zh-CN", region="CN", timeout=15, proxy=None):
+        # type: (str, str, str, int, str) -> None
         if not api_key:
             raise TmdbError(0, "TMDB API Key 未配置。请运行: quark-cli media config --tmdb-key <your_key>")
         self._api_key = api_key
@@ -110,6 +110,8 @@ class TmdbSource(DiscoverySource):
         self._timeout = timeout
         self._session = requests.Session()
         self._session.headers["Accept"] = "application/json"
+        if proxy:
+            self._session.proxies = {"http": proxy, "https": proxy}
         # 缓存 genres
         self._genre_cache = {}
 

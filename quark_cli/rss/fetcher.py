@@ -406,6 +406,7 @@ def fetch_feed(
     last_modified="",
     timeout=30,
     max_retries=2,
+    proxy=None,
 ):
     """
     拉取并解析 RSS Feed.
@@ -451,8 +452,10 @@ def fetch_feed(
     last_error = None
     for attempt in range(max_retries + 1):
         try:
+            proxies = {"http": proxy, "https": proxy} if proxy else None
             resp = requests.get(
-                feed_url, headers=headers, timeout=timeout, allow_redirects=True
+                feed_url, headers=headers, timeout=timeout, allow_redirects=True,
+                proxies=proxies,
             )
 
             # 304 Not Modified

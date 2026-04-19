@@ -52,6 +52,8 @@ export const configApi = {
   setBot:       (data)                    => put('/config/bot', data),
   export:       ()                        => request('/config/export'),
   import:       (data)                    => post('/config/import', data),
+  readProxy:    ()                        => request('/config/proxy'),
+  setProxy:     (data)                    => put('/config/proxy', data),
 }
 
 // ── Drive (网盘文件) ──

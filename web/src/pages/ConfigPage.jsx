@@ -4,7 +4,7 @@ import {
   Shield, Loader2, Sparkles, Calendar, TrendingUp,
   Settings, Cookie, Server, Film, Save, Trash2, Plus,
   Eye, EyeOff, RefreshCw, AlertCircle, FileText, MessageSquare, Bot,
-  Download, Upload,
+  Download, Upload, Globe,
 } from 'lucide-react'
 import { accountApi, configApi } from '../api/client'
 import { PageSpinner, ErrorBanner, PageHeader } from '../components/UI'
@@ -716,6 +716,126 @@ function FeishuBotSection({ onRefresh }) {
 }
 
 
+
+/* ════════════════════════════════════════════════
+   Section: 代理配置
+   ════════════════════════════════════════════════ */
+function ProxySection({ config, onRefresh }) {
+  const proxy = config.proxy || {}
+  const [form, setForm] = useState({
+    url: proxy.url || '',
+    targets: proxy.targets || [],
+  })
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState(null)
+
+  useEffect(() => {
+    setForm({
+      url: (config.proxy?.url) || '',
+      targets: (config.proxy?.targets) || [],
+    })
+  }, [config])
+
+  const toggleTarget = (target) => {
+    setForm(f => ({
+      ...f,
+      targets: f.targets.includes(target)
+        ? f.targets.filter(t => t !== target)
+        : [...f.targets, target],
+    }))
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setToast(null)
+    try {
+      await configApi.setProxy({ url: form.url.trim(), targets: form.targets })
+      setToast({ msg: '代理配置已保存', type: 'success' })
+      onRefresh()
+    } catch (e) {
+      setToast({ msg: e.message, type: 'error' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const inputCls = "w-full bg-surface-2 border border-surface-3 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500"
+
+  const TARGETS = [
+    { key: 'tmdb', label: 'TMDB', desc: '影视元数据 (TheMovieDB)', color: 'text-green-400 bg-green-500/15 border-green-500/30' },
+    { key: 'douban', label: '豆瓣', desc: '豆瓣影视数据', color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30' },
+    { key: 'rss', label: 'RSS', desc: 'RSS 订阅源抓取', color: 'text-orange-400 bg-orange-500/15 border-orange-500/30' },
+  ]
+
+  return (
+    <div className="card p-6 mb-6">
+      <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
+        <Globe size={20} className="text-cyan-400" /> 代理配置
+      </h3>
+
+      <div className="mb-4">
+        <label className="text-xs text-gray-500 mb-1 block">代理地址</label>
+        <input
+          value={form.url}
+          onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+          placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+          className={inputCls}
+        />
+        <div className="text-[10px] text-gray-600 mt-1">
+          支持 HTTP / HTTPS / SOCKS5 / SOCKS4 代理协议。留空则不使用代理。
+        </div>
+      </div>
+
+      <div className="mb-4">
+        <label className="text-xs text-gray-500 mb-2 block">需要代理的服务</label>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {TARGETS.map(t => {
+            const active = form.targets.includes(t.key)
+            return (
+              <button
+                key={t.key}
+                onClick={() => toggleTarget(t.key)}
+                className={`p-3 rounded-lg border text-left transition-all ${
+                  active
+                    ? t.color + ' border-current'
+                    : 'bg-surface-2 border-surface-3 text-gray-500 hover:border-surface-4'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-semibold">{t.label}</span>
+                  <div className={`w-4 h-4 rounded border flex items-center justify-center transition ${
+                    active ? 'bg-current border-current' : 'border-gray-600'
+                  }`}>
+                    {active && <CheckCircle2 size={12} className="text-surface-1" />}
+                  </div>
+                </div>
+                <div className="text-[10px] opacity-70">{t.desc}</div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {form.url && form.targets.length === 0 && (
+        <div className="flex items-center gap-2 text-amber-400 text-xs p-2 bg-amber-500/10 rounded-lg mb-4">
+          <AlertCircle size={14} />
+          已配置代理地址，但未选择任何需要代理的服务
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button onClick={handleSave} disabled={saving}
+          className="px-5 py-2 bg-brand-600 hover:bg-brand-500 disabled:bg-surface-3 disabled:text-gray-600
+                     text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          保存配置
+        </button>
+        <Toast msg={toast?.msg} type={toast?.type} />
+      </div>
+    </div>
+  )
+}
+
 /* ════════════════════════════════════════════════
    Section: 配置导出 / 导入
    ════════════════════════════════════════════════ */
@@ -853,6 +973,9 @@ export default function ConfigPage() {
 
       {/* TMDB 配置 */}
       <TmdbSection config={config} onRefresh={loadConfig} />
+
+      {/* 代理配置 */}
+      <ProxySection config={config} onRefresh={loadConfig} />
 
       {/* 飞书机器人 */}
       <FeishuBotSection onRefresh={loadConfig} />

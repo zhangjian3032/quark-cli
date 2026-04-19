@@ -27,6 +27,20 @@ def get_config_path():
     return _config_path
 
 
+def get_proxy_for(target):
+    """获取指定目标的代理 URL, 若未配置或未启用则返回 None"""
+    cfg = get_config()
+    cfg.load()
+    proxy_cfg = cfg.data.get("proxy", {})
+    proxy_url = proxy_cfg.get("url", "").strip()
+    if not proxy_url:
+        return None
+    targets = proxy_cfg.get("targets", [])
+    if target in targets:
+        return proxy_url
+    return None
+
+
 def _get_cache_config():
     """读取缓存配置"""
     cfg = get_config()
@@ -98,6 +112,7 @@ def get_tmdb_source():
         api_key=api_key,
         language=disc.get("language", "zh-CN"),
         region=disc.get("region", "CN"),
+        proxy=get_proxy_for("tmdb"),
     )
 
 
@@ -105,7 +120,7 @@ def get_tmdb_source():
 
 def get_douban_source():
     from quark_cli.media.discovery.douban import DoubanSource
-    return DoubanSource()
+    return DoubanSource(proxy=get_proxy_for("douban"))
 
 
 # ── 统一发现服务 (带缓存) ──
