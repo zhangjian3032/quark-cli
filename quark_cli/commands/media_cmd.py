@@ -68,13 +68,25 @@ def _get_tmdb_source(args):
     language = discovery_cfg.get("language", "zh-CN")
     region = discovery_cfg.get("region", "CN")
 
-    return TmdbSource(api_key=api_key, language=language, region=region)
+    # proxy
+    from quark_cli.config import get_proxy_for
+    from quark_cli.commands.helpers import get_config as _get_cfg
+    proxy = get_proxy_for(_get_cfg(args).data, "tmdb")
+    return TmdbSource(api_key=api_key, language=language, region=region, proxy=proxy)
 
 
-def _get_douban_source():
-    """创建豆瓣数据源实例 (无需配置)"""
+def _get_douban_source(args=None):
+    """创建豆瓣数据源实例"""
     from quark_cli.media.discovery.douban import DoubanSource
-    return DoubanSource()
+    proxy = None
+    if args is not None:
+        try:
+            from quark_cli.config import get_proxy_for
+            from quark_cli.commands.helpers import get_config as _get_cfg
+            proxy = get_proxy_for(_get_cfg(args).data, "douban")
+        except Exception:
+            pass
+    return DoubanSource(proxy=proxy)
 
 
 def _get_discovery_source(args, source_name="auto"):
@@ -84,7 +96,7 @@ def _get_discovery_source(args, source_name="auto"):
     返回 (source_instance, actual_source_name)
     """
     if source_name == "douban":
-        return _get_douban_source(), "douban"
+        return _get_douban_source(args), "douban"
     elif source_name == "tmdb":
         from quark_cli.media.discovery.tmdb import TmdbError
         try:
@@ -98,7 +110,7 @@ def _get_discovery_source(args, source_name="auto"):
             return src, "tmdb"
         except Exception:
             info("TMDB 不可用，自动切换到豆瓣数据源")
-            return _get_douban_source(), "douban"
+            return _get_douban_source(args), "douban"
 
 
 def _looks_like_guid(value):

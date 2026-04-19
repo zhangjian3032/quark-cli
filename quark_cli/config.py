@@ -136,3 +136,26 @@ class ConfigManager:
                 for c in cookies
             ]
         return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+# ── Proxy 工具函数 ──
+
+def get_proxy_for(cfg_data: dict, target: str):
+    """
+    通用 proxy 查询: 根据配置 dict 获取指定目标的代理 URL。
+
+    Args:
+        cfg_data: config.json 的完整 data dict
+        target: 代理目标名称, 如 "tmdb", "douban", "rss"
+
+    Returns:
+        proxy URL 字符串, 若未配置或目标不在列表中返回 None
+    """
+    proxy_cfg = cfg_data.get("proxy", {})
+    proxy_url = proxy_cfg.get("url", "").strip()
+    if not proxy_url:
+        return None
+    targets = proxy_cfg.get("targets", [])
+    if target in targets:
+        return proxy_url
+    return None

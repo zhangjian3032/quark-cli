@@ -29,16 +29,10 @@ def get_config_path():
 
 def get_proxy_for(target):
     """获取指定目标的代理 URL, 若未配置或未启用则返回 None"""
+    from quark_cli.config import get_proxy_for as _proxy_for
     cfg = get_config()
     cfg.load()
-    proxy_cfg = cfg.data.get("proxy", {})
-    proxy_url = proxy_cfg.get("url", "").strip()
-    if not proxy_url:
-        return None
-    targets = proxy_cfg.get("targets", [])
-    if target in targets:
-        return proxy_url
-    return None
+    return _proxy_for(cfg.data, target)
 
 
 def _get_cache_config():

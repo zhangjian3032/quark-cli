@@ -166,7 +166,10 @@ def run_auto_save(config_path, name, media_type="movie", year=None, dry_run=Fals
 
             language = discovery_cfg.get("language", "zh-CN")
             region = discovery_cfg.get("region", "CN")
-            source = TmdbSource(api_key=api_key, language=language, region=region)
+            # proxy
+            from quark_cli.config import get_proxy_for
+            proxy = get_proxy_for(cfg.data, "tmdb")
+            source = TmdbSource(api_key=api_key, language=language, region=region, proxy=proxy)
 
             search_result = source.search(name, media_type=media_type, page=1, year=year)
             # fallback 另一类型

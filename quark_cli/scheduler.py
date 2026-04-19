@@ -94,6 +94,14 @@ def _parse_interval(task):
 
 # ── 创建数据源 ──
 
+
+def _get_proxy(cfg, target):
+    """从配置中获取 proxy URL"""
+    from quark_cli.config import get_proxy_for
+    return get_proxy_for(cfg.data, target)
+
+
+
 def _create_discovery_source(task, cfg):
     """
     根据任务配置创建数据源实例。
@@ -110,7 +118,8 @@ def _create_discovery_source(task, cfg):
 
     if source_name == "douban":
         from quark_cli.media.discovery.douban import DoubanSource
-        return DoubanSource(), "douban"
+        proxy = _get_proxy(cfg, "douban")
+        return DoubanSource(proxy=proxy), "douban"
 
     # 默认 tmdb
     from quark_cli.media.discovery.tmdb import TmdbSource
@@ -119,12 +128,15 @@ def _create_discovery_source(task, cfg):
         # 回退到豆瓣
         logger.warning("TMDB API Key 未配置, 回退到豆瓣数据源")
         from quark_cli.media.discovery.douban import DoubanSource
-        return DoubanSource(), "douban"
+        proxy = _get_proxy(cfg, "douban")
+        return DoubanSource(proxy=proxy), "douban"
 
+    proxy = _get_proxy(cfg, "tmdb")
     return TmdbSource(
         api_key=tmdb_key,
         language=disc_cfg.get("language", "zh-CN"),
         region=disc_cfg.get("region", "CN"),
+        proxy=proxy,
     ), "tmdb"
 
 
