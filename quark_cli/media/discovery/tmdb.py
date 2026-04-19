@@ -9,6 +9,8 @@ from quark_cli.media.discovery.base import (
     DiscoveryItem,
     DiscoveryResult,
     DiscoverySource,
+    PersonItem,
+    PersonResult,
 )
 
 # TMDB API v3 base
@@ -294,6 +296,91 @@ class TmdbSource(DiscoverySource):
                 if gid is not None:
                     ids.append(str(gid))
         return ",".join(ids)
+
+
+    # ── 演员搜索 ──
+
+    def search_person(self, query, page=1):
+        # type: (str, int) -> PersonResult
+        """搜索演员/人物"""
+        data = self._get("/search/person", {"query": query, "page": page})
+        items = []
+        for raw in data.get("results", []):
+            known_for = []
+            for kf in raw.get("known_for", []):
+                mt = kf.get("media_type", "movie")
+                known_for.append(_parse_item(kf, mt))
+            items.append(PersonItem(
+                person_id=str(raw.get("id", "")),
+                name=raw.get("name", ""),
+                original_name=raw.get("original_name", "") or raw.get("name", ""),
+                gender=raw.get("gender", 0),
+                profile_path=raw.get("profile_path", "") or "",
+                known_for_department=raw.get("known_for_department", ""),
+                popularity=float(raw.get("popularity", 0) or 0),
+                known_for=known_for,
+                extra=raw,
+            ))
+        return PersonResult(
+            items=items,
+            total=int(data.get("total_results", 0)),
+            page=int(data.get("page", 1)),
+            total_pages=int(data.get("total_pages", 1)),
+        )
+
+    def get_person_credits(self, person_id, media_type=None):
+        # type: (str, str) -> list
+        """获取演员参演作品 (cast + crew), 按评分降序"""
+        data = self._get("/person/{}/combined_credits".format(person_id))
+        items = []
+        seen_ids = set()
+        for raw in data.get("cast", []):
+            mid = str(raw.get("id", ""))
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            mt = raw.get("media_type", "movie")
+            if media_type and mt != media_type:
+                continue
+            item = _parse_item(raw, mt)
+            item.extra["character"] = raw.get("character", "")
+            items.append(item)
+        for raw in data.get("crew", []):
+            mid = str(raw.get("id", ""))
+            if mid in seen_ids:
+                continue
+            seen_ids.add(mid)
+            mt = raw.get("media_type", "movie")
+            if media_type and mt != media_type:
+                continue
+            item = _parse_item(raw, mt)
+            item.extra["job"] = raw.get("job", "")
+            items.append(item)
+        # 按评分降序
+        items.sort(key=lambda x: (x.rating or 0), reverse=True)
+        return items
+
+    def get_person_detail(self, person_id):
+        # type: (str,) -> PersonItem
+        """获取演员详情 (含传记等)"""
+        data = self._get("/person/{}".format(person_id))
+        return PersonItem(
+            person_id=str(data.get("id", "")),
+            name=data.get("name", ""),
+            original_name=data.get("also_known_as", [""])[0] if data.get("also_known_as") else data.get("name", ""),
+            gender=data.get("gender", 0),
+            profile_path=data.get("profile_path", "") or "",
+            known_for_department=data.get("known_for_department", ""),
+            popularity=float(data.get("popularity", 0) or 0),
+            extra={
+                "biography": data.get("biography", ""),
+                "birthday": data.get("birthday", ""),
+                "deathday": data.get("deathday", ""),
+                "place_of_birth": data.get("place_of_birth", ""),
+                "imdb_id": data.get("imdb_id", ""),
+                "homepage": data.get("homepage", ""),
+            },
+        )
 
     # ── 图片 URL ──
 

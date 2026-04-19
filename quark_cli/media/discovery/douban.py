@@ -19,6 +19,8 @@ from quark_cli.media.discovery.base import (
     DiscoveryItem,
     DiscoveryResult,
     DiscoverySource,
+    PersonItem,
+    PersonResult,
 )
 
 logger = logging.getLogger("quark_cli.discovery.douban")
@@ -532,6 +534,88 @@ class DoubanSource(DiscoverySource):
             page=page,
             total_pages=total_pages,
         )
+
+
+    # ── 演员/人物 ──
+
+    def search_person(self, query, page=1):
+        # type: (str, int) -> PersonResult
+        """搜索演员 (豆瓣 Frodo 微信搜索接口)"""
+        count = 20
+        start = (page - 1) * count
+        try:
+            data = self._frodo_get(
+                "/search/weixin",
+                {"q": query, "type": "celebrity", "start": start, "count": count},
+            )
+        except DoubanError:
+            return PersonResult()
+
+        raw_items = data.get("items", [])
+        total = int(data.get("total", 0))
+        items = []
+        for raw in raw_items:
+            target = raw.get("target", {})
+            if not target:
+                continue
+            # 头像
+            avatar = ""
+            cover = target.get("cover_url", "") or ""
+            if not cover:
+                av_obj = target.get("avatar", {}) or {}
+                cover = av_obj.get("large", "") or av_obj.get("normal", "") or ""
+            avatar = cover
+
+            items.append(PersonItem(
+                person_id=str(target.get("id", "")),
+                name=target.get("title", "") or target.get("name", ""),
+                original_name=target.get("latin_name", "") or target.get("title", ""),
+                gender=0,
+                profile_path=avatar,
+                known_for_department=target.get("abstract", ""),
+                popularity=0.0,
+                extra={
+                    "douban_url": "https://movie.douban.com/celebrity/{}/".format(target.get("id", "")),
+                    "abstract": target.get("abstract", ""),
+                },
+            ))
+        total_pages = max(1, (total + count - 1) // count)
+        return PersonResult(items=items, total=total, page=page, total_pages=total_pages)
+
+    def get_person_credits(self, person_id, media_type=None):
+        # type: (str, str) -> list
+        """获取演员参演作品 (豆瓣影人作品, 按评分排序)"""
+        items = []
+        start = 0
+        count = 50
+        while True:
+            try:
+                data = self._frodo_get(
+                    "/celebrity/{}/works".format(person_id),
+                    {"start": start, "count": count, "sort": "vote"},
+                )
+            except DoubanError:
+                break
+
+            raw_items = data.get("works", [])
+            total = int(data.get("total", 0))
+            for raw in raw_items:
+                subject = raw.get("subject", {})
+                if not subject:
+                    continue
+                mt = "tv" if subject.get("subtype") == "tv" else "movie"
+                if media_type and mt != media_type:
+                    continue
+                item = _parse_collection_item(subject, mt)
+                # 附加角色信息
+                roles = raw.get("roles", [])
+                if roles:
+                    item.extra["character"] = " / ".join(roles)
+                items.append(item)
+            start += count
+            if start >= total or not raw_items:
+                break
+        return items
 
     def get_collection(self, collection_name, media_type="movie", page=1):
         return self._get_collection(collection_name, media_type, page)

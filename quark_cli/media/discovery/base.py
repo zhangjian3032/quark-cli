@@ -71,6 +71,47 @@ class DiscoveryResult:
         self.total_pages = total_pages
 
 
+
+
+class PersonItem:
+    """演员/人物统一数据模型"""
+
+    def __init__(
+        self,
+        person_id="",
+        name="",
+        original_name="",
+        gender=0,
+        profile_path="",
+        known_for_department="",
+        popularity=0.0,
+        known_for=None,
+        extra=None,
+    ):
+        self.person_id = str(person_id)
+        self.name = name
+        self.original_name = original_name or name
+        self.gender = gender  # 0=未知, 1=女, 2=男
+        self.profile_path = profile_path
+        self.known_for_department = known_for_department
+        self.popularity = popularity
+        self.known_for = known_for or []  # list[DiscoveryItem]
+        self.extra = extra or {}
+
+    def __repr__(self):
+        return "<PersonItem {} [{}]>".format(self.name, self.person_id)
+
+
+class PersonResult:
+    """人物搜索结果分页"""
+
+    def __init__(self, items=None, total=0, page=1, total_pages=1):
+        self.items = items or []  # list[PersonItem]
+        self.total = total
+        self.page = page
+        self.total_pages = total_pages
+
+
 class DiscoverySource(ABC):
     """
     影视发现源抽象基类
@@ -137,6 +178,24 @@ class DiscoverySource(ABC):
         # type: (str,) -> dict
         """获取类型列表, 返回 {id: name, ...}"""
         ...
+
+
+    # ── 演员/人物 ──
+
+    def search_person(self, query, page=1):
+        # type: (str, int) -> PersonResult
+        """搜索演员/人物 (默认不支持, 子类可覆盖)"""
+        return PersonResult()
+
+    def get_person_credits(self, person_id, media_type=None):
+        # type: (str, str) -> list
+        """获取演员参演作品列表, 返回 list[DiscoveryItem] (默认空)"""
+        return []
+
+    def get_person_detail(self, person_id):
+        # type: (str,) -> PersonItem
+        """获取演员详情 (默认不支持)"""
+        return PersonItem()
 
     def get_poster_url(self, path, size="w500"):
         # type: (str, str) -> str

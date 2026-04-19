@@ -190,6 +190,82 @@ class DiscoveryService:
             "items": items,
         }
 
+
+    # ── 演员/人物 ──
+
+    def person_search(self, query, page=1):
+        """搜索演员, 返回 dict"""
+        result = self._source.search_person(query, page=page)
+        items = []
+        for p in result.items:
+            entry = {
+                "person_id": p.person_id,
+                "name": p.name,
+                "original_name": p.original_name,
+                "known_for_department": p.known_for_department,
+                "popularity": p.popularity,
+            }
+            if p.profile_path:
+                entry["profile_url"] = self._source.get_poster_url(p.profile_path)
+            if p.known_for:
+                entry["known_for"] = [
+                    {
+                        "source_id": kf.source_id,
+                        "title": kf.title,
+                        "year": kf.year,
+                        "rating": kf.rating,
+                        "media_type": kf.media_type,
+                    }
+                    for kf in p.known_for[:3]
+                ]
+            items.append(entry)
+        return {
+            "source": self._source.source_name,
+            "results": items,
+            "total": result.total,
+            "page": result.page,
+            "total_pages": result.total_pages,
+        }
+
+    def person_credits(self, person_id, media_type=None):
+        """获取演员参演作品, 返回 dict"""
+        credits_list = self._source.get_person_credits(person_id, media_type=media_type)
+
+        # resolve genres
+        for it in credits_list:
+            if it.genres and isinstance(it.genres[0], int):
+                try:
+                    if hasattr(self._source, "resolve_genre_names"):
+                        it.genres = self._source.resolve_genre_names(it.genres, it.media_type)
+                except Exception:
+                    pass
+
+        items = []
+        for it in credits_list:
+            entry = {
+                "source_id": it.source_id,
+                "title": it.title,
+                "original_title": it.original_title,
+                "year": it.year,
+                "media_type": it.media_type,
+                "rating": it.rating,
+                "vote_count": it.vote_count,
+                "genres": it.genres if isinstance(it.genres, list) and it.genres and isinstance(it.genres[0], str) else [],
+                "poster_url": self._source.get_poster_url(it.poster_path) if it.poster_path else "",
+            }
+            if it.extra.get("character"):
+                entry["character"] = it.extra["character"]
+            if it.extra.get("job"):
+                entry["job"] = it.extra["job"]
+            items.append(entry)
+
+        return {
+            "source": self._source.source_name,
+            "person_id": person_id,
+            "total": len(items),
+            "credits": items,
+        }
+
     def get_genres(self, media_type="movie"):
         genres_map = self._source.get_genres(media_type)
         return [{"id": k, "name": v} for k, v in sorted(genres_map.items())]

@@ -298,6 +298,29 @@ Web 面板:
     mas.add_argument("--dry-run", action="store_true", default=False,
                       help="仅搜索和排序，不实际转存")
 
+    # media person  (演员/人物发现)
+    mp_person = media_sub.add_parser("person", help="演员/人物发现 (搜索演员 + 查看参演作品)")
+    mp_person.add_argument("name", nargs="?", help="演员名称 (如 '刘德华')")
+    mp_person.add_argument("--id", dest="person_id", help="直接指定演员 ID (TMDB person_id 或 豆瓣 celebrity_id)")
+    mp_person.add_argument("-s", "--source", default="auto",
+                            choices=["auto", "tmdb", "douban"],
+                            help="数据源 (默认 auto)")
+    mp_person.add_argument("-t", "--type", default=None, choices=["movie", "tv"],
+                            help="过滤作品类型 (不指定则显示全部)")
+    mp_person.add_argument("-p", "--page", type=int, default=1, help="搜索页码")
+
+    # media batch-save  (批量搜索转存)
+    mbs = media_sub.add_parser("batch-save", help="批量搜索+转存 (多部影视一次搞定)")
+    mbs.add_argument("names", nargs="+", help="影视名称列表 (如 '流浪地球2' '三体' '满江红')")
+    mbs.add_argument("-t", "--type", default="movie", choices=["movie", "tv"],
+                      help="类型 (默认 movie)")
+    mbs.add_argument("--base-path", default="/媒体",
+                      help="保存路径基准目录 (默认 /媒体)")
+    mbs.add_argument("--max-attempts", type=int, default=10,
+                      help="每部影视最大尝试链接数 (默认 10)")
+    mbs.add_argument("--dry-run", action="store_true", default=False,
+                      help="仅搜索排序，不实际转存")
+
 
     # ========== sync (WebDAV → NAS 同步) ==========
     sync_parser = subparsers.add_parser("sync", help="WebDAV 挂载目录 → NAS 本地文件同步")

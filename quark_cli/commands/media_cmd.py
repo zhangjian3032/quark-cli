@@ -1050,6 +1050,402 @@ def _discover_douban(source, list_type, media_type, page,
 # ──────────────────────────────────────────────
 
 
+
+# ──────────────────────────────────────────────
+# media person (演员/人物发现)
+# ──────────────────────────────────────────────
+
+def _handle_person(args):
+    """media person - 搜索演员, 查看参演作品"""
+    name = getattr(args, "name", None)
+    person_id = getattr(args, "person_id", None)
+    source_name = getattr(args, "source", "auto") or "auto"
+    media_type = getattr(args, "type", None)
+    page = getattr(args, "page", 1) or 1
+
+    if not name and not person_id:
+        error("请指定演员名称或 --id\n"
+              "  用法: quark-cli media person \"刘德华\"\n"
+              "        quark-cli media person --id 1337 -s tmdb")
+        sys.exit(1)
+
+    try:
+        source, actual_source = _get_discovery_source(args, source_name)
+    except Exception as e:
+        error(str(e))
+        sys.exit(1)
+
+    source_label = "豆瓣" if actual_source == "douban" else "TMDB"
+
+    # ── 如果指定了 --id, 直接获取作品列表 ──
+    if person_id:
+        try:
+            credits_list = source.get_person_credits(person_id, media_type=media_type)
+        except Exception as e:
+            error("获取演员作品失败: {}".format(e))
+            sys.exit(1)
+
+        # 尝试获取演员详情
+        person_info = None
+        try:
+            person_info = source.get_person_detail(person_id)
+        except Exception:
+            pass
+
+        if is_json_mode():
+            items = []
+            for it in credits_list:
+                entry = {
+                    "source_id": it.source_id,
+                    "title": it.title,
+                    "original_title": it.original_title,
+                    "year": it.year,
+                    "media_type": it.media_type,
+                    "rating": it.rating,
+                    "vote_count": it.vote_count,
+                }
+                if it.extra.get("character"):
+                    entry["character"] = it.extra["character"]
+                if it.extra.get("job"):
+                    entry["job"] = it.extra["job"]
+                items.append(entry)
+            result = {
+                "source": actual_source,
+                "person_id": person_id,
+                "credits": items,
+                "total": len(items),
+            }
+            if person_info and person_info.name:
+                result["person"] = {
+                    "name": person_info.name,
+                    "original_name": person_info.original_name,
+                    "known_for": person_info.known_for_department,
+                }
+                if person_info.extra.get("biography"):
+                    result["person"]["biography"] = person_info.extra["biography"][:500]
+            json_out(result)
+            return
+
+        # 终端输出
+        if person_info and person_info.name:
+            header("\U0001f3ac {} 的作品".format(person_info.name))
+            if person_info.original_name and person_info.original_name != person_info.name:
+                print(colorize("  {}".format(person_info.original_name), Color.DIM))
+            if person_info.extra.get("biography"):
+                bio = person_info.extra["biography"][:200]
+                print()
+                print(colorize("  {}".format(bio), Color.DIM))
+            print()
+        else:
+            header("\U0001f3ac 演员 {} 的作品".format(person_id))
+
+        if not credits_list:
+            warning("未找到参演作品")
+            return
+
+        type_filter = " ({})".format("电影" if media_type == "movie" else "剧集") if media_type else ""
+        info("[{}] 共 {} 部作品{}".format(source_label, len(credits_list), type_filter))
+        print()
+
+        cols = ["#", "名称", "年份", "评分", "类型", "角色/职务", "ID"]
+        widths = [4, 26, 6, 6, 6, 20, 10]
+        table_header(cols, widths)
+        for i, it in enumerate(credits_list[:50], start=1):
+            role = it.extra.get("character", "") or it.extra.get("job", "")
+            mt_label = "电影" if it.media_type == "movie" else "剧集"
+            table_row(
+                [str(i), it.title[:24], it.year or "-", str(it.rating) if it.rating else "-",
+                 mt_label, role[:18], it.source_id],
+                widths,
+                colors=[Color.DIM, Color.CYAN, Color.GREEN, Color.YELLOW, Color.MAGENTA, Color.DIM, Color.DIM],
+            )
+
+        print()
+        if actual_source == "douban":
+            print(colorize("  ▶ 查看详情: quark-cli media meta --douban <ID>", Color.DIM))
+            print(colorize("  ▶ 自动转存: quark-cli media auto-save \"<名称>\"", Color.DIM))
+        else:
+            print(colorize("  ▶ 查看详情: quark-cli media meta --tmdb <ID>", Color.DIM))
+            print(colorize("  ▶ 自动转存: quark-cli media auto-save \"<名称>\"", Color.DIM))
+        return
+
+    # ── 搜索演员 ──
+    try:
+        result = source.search_person(name, page=page)
+    except Exception as e:
+        error("[{}] 演员搜索失败: {}".format(source_label, e))
+        sys.exit(1)
+
+    if not result.items:
+        if is_json_mode():
+            json_out({"source": actual_source, "results": [], "total": 0})
+        else:
+            warning("[{}] 未找到匹配 '{}' 的演员".format(source_label, name))
+        return
+
+    if is_json_mode():
+        items = []
+        for p in result.items:
+            entry = {
+                "person_id": p.person_id,
+                "name": p.name,
+                "original_name": p.original_name,
+                "known_for_department": p.known_for_department,
+                "popularity": p.popularity,
+            }
+            if p.profile_path:
+                entry["profile_url"] = source.get_poster_url(p.profile_path) if hasattr(source, "get_poster_url") else p.profile_path
+            if p.known_for:
+                entry["known_for"] = [
+                    {"title": kf.title, "year": kf.year, "rating": kf.rating}
+                    for kf in p.known_for[:3]
+                ]
+            items.append(entry)
+        json_out({
+            "source": actual_source,
+            "results": items,
+            "total": result.total,
+            "page": result.page,
+            "total_pages": result.total_pages,
+        })
+        return
+
+    header("\U0001f50d [{}] 演员搜索: {}".format(source_label, name))
+    print()
+
+    for i, p in enumerate(result.items[:10], start=1):
+        print("  {}. {} {}".format(
+            colorize(str(i), Color.CYAN),
+            colorize(p.name, Color.GREEN),
+            colorize("({})".format(p.original_name), Color.DIM) if p.original_name != p.name else "",
+        ))
+        if p.known_for_department:
+            print("     {}".format(colorize(p.known_for_department, Color.DIM)))
+        if p.known_for:
+            kf_strs = ["{} ({})".format(kf.title, kf.year) for kf in p.known_for[:3]]
+            print("     代表作: {}".format(colorize(" / ".join(kf_strs), Color.DIM)))
+        print("     ID: {}".format(colorize(p.person_id, Color.DIM)))
+        print()
+
+    print("  共 {} 位 | 第 {}/{} 页".format(result.total, result.page, result.total_pages))
+    print()
+    first_id = result.items[0].person_id
+    print(colorize("  ▶ 查看作品: quark-cli media person --id {} -s {}".format(first_id, actual_source), Color.DIM))
+
+
+# ──────────────────────────────────────────────
+# media batch-save (批量搜索转存)
+# ──────────────────────────────────────────────
+
+def _handle_batch_save(args):
+    """media batch-save - 批量搜索+转存 多部影视"""
+    from quark_cli.commands.helpers import get_client, get_config
+    from quark_cli.search import PanSearch
+    from quark_cli.media.autosave import auto_save_pipeline
+
+    names = getattr(args, "names", [])
+    media_type = getattr(args, "type", "movie") or "movie"
+    base_path = getattr(args, "base_path", "/媒体") or "/媒体"
+    max_attempts = getattr(args, "max_attempts", 10) or 10
+    dry_run = getattr(args, "dry_run", False)
+
+    if not names:
+        error("请指定至少一个影视名称\n"
+              "  用法: quark-cli media batch-save \"流浪地球2\" \"三体\" \"满江红\"")
+        sys.exit(1)
+
+    if not is_json_mode():
+        header("\U0001f680 批量搜索转存")
+        kvline("数量", "{} 部".format(len(names)))
+        kvline("类型", "电影" if media_type == "movie" else "剧集")
+        kvline("基准路径", base_path)
+        kvline("最大尝试", str(max_attempts))
+        if dry_run:
+            kvline("模式", colorize("DRY RUN", Color.YELLOW))
+        print()
+        for i, n in enumerate(names, 1):
+            print("  {}. {}".format(i, n))
+        print()
+        divider()
+        print()
+
+    # 初始化搜索引擎和夸克客户端
+    cfg = get_config(args)
+    search_engine = PanSearch(config=cfg)
+
+    quark_client = None
+    if not dry_run:
+        quark_client = get_client(args)
+        account_info = quark_client.init()
+        if not account_info:
+            error("夸克账号验证失败，请检查 Cookie")
+            sys.exit(1)
+        if not is_json_mode():
+            info("夸克账号: {}".format(quark_client.nickname))
+            print()
+
+    # TMDB 源 (可选)
+    tmdb_source = None
+    try:
+        tmdb_source = _get_tmdb_source(args)
+    except Exception:
+        if not is_json_mode():
+            info("TMDB 不可用，将使用原始名称搜索")
+
+    results_summary = []
+
+    for idx, name in enumerate(names, 1):
+        if not is_json_mode():
+            subheader("[{}/{}] {}".format(idx, len(names), name))
+
+        # 1. 生成搜索关键词和保存路径
+        keywords = [name]
+        save_path = ""
+        tmdb_item = None
+
+        if tmdb_source:
+            try:
+                from quark_cli.media.discovery.naming import suggest_search_keywords, suggest_save_path
+                result = tmdb_source.search(name, media_type=media_type, page=1)
+                if not result.items:
+                    alt = "tv" if media_type == "movie" else "movie"
+                    result = tmdb_source.search(name, media_type=alt, page=1)
+                if result.items:
+                    first = result.items[0]
+                    tmdb_item = tmdb_source.get_detail(first.source_id, media_type)
+                    if tmdb_item.genres and isinstance(tmdb_item.genres[0], int):
+                        try:
+                            tmdb_item.genres = tmdb_source.resolve_genre_names(tmdb_item.genres, media_type)
+                        except Exception:
+                            pass
+                    keywords = suggest_search_keywords(tmdb_item)
+                    paths = suggest_save_path(tmdb_item, base_path=base_path)
+                    if paths:
+                        save_path = paths[0]["path"]
+                    if not is_json_mode():
+                        info("TMDB: {} ({}) ★{}".format(tmdb_item.title, tmdb_item.year, tmdb_item.rating))
+            except Exception as e:
+                if not is_json_mode():
+                    warning("TMDB 查询跳过: {}".format(e))
+
+        if not save_path:
+            type_folder = "电影" if media_type == "movie" else "剧集"
+            save_path = "/{}/{}/{}".format(base_path.strip("/"), type_folder, name)
+
+        if not is_json_mode():
+            kvline("  关键词", " | ".join(keywords))
+            kvline("  保存路径", save_path)
+
+        if dry_run:
+            # 仅搜索展示
+            all_results = []
+            for kw in keywords:
+                sr = search_engine.search_all(kw)
+                if sr.get("success") and sr.get("results"):
+                    all_results.extend(sr["results"])
+            from quark_cli.media.autosave import filter_quark_links, rank_results
+            quark_results = filter_quark_links(all_results)
+            ranked = rank_results(quark_results, keywords)
+            top = ranked[0] if ranked else None
+            results_summary.append({
+                "name": name,
+                "success": bool(top),
+                "candidates": len(quark_results),
+                "top_score": top.get("score", 0) if top else 0,
+                "save_path": save_path,
+                "dry_run": True,
+            })
+            if not is_json_mode():
+                if top:
+                    success("  找到 {} 个夸克链接, Top: {} (评分 {})".format(
+                        len(quark_results), top.get("title", "")[:30], top.get("score", 0)))
+                else:
+                    warning("  未找到夸克链接")
+            print()
+            continue
+
+        # 2. 执行 auto_save_pipeline
+        def on_progress(event, data):
+            if is_json_mode():
+                return
+            if event == "try_start":
+                info("  [{}/{}] 尝试: {} (评分 {})".format(
+                    data.get("index", "?"), max_attempts,
+                    data.get("title", "")[:40], data.get("score", 0)
+                ))
+            elif event == "try_fail":
+                warning("    ✗ {}".format(data.get("error", "未知")))
+            elif event == "save_success":
+                success("    ✔ 转存成功! {} 个文件".format(data.get("saved_count", 0)))
+
+        pipeline_result = auto_save_pipeline(
+            quark_client=quark_client,
+            search_engine=search_engine,
+            keywords=keywords,
+            save_path=save_path,
+            max_attempts=max_attempts,
+            on_progress=on_progress,
+            media_title=tmdb_item.title if tmdb_item else "",
+            media_year=tmdb_item.year if tmdb_item else None,
+            media_type=media_type,
+        )
+
+        results_summary.append({
+            "name": name,
+            "success": pipeline_result.get("success", False),
+            "saved_count": pipeline_result.get("saved_count", 0),
+            "save_path": save_path,
+            "attempts": pipeline_result.get("attempts", 0),
+            "error": pipeline_result.get("error", ""),
+        })
+
+        if not is_json_mode():
+            if pipeline_result.get("success"):
+                success("  ✔ {} — 转存 {} 个文件".format(name, pipeline_result.get("saved_count", 0)))
+            else:
+                error("  ✗ {} — {}".format(name, pipeline_result.get("error", "失败")))
+            print()
+
+    # ── 汇总 ──
+    if is_json_mode():
+        ok_count = sum(1 for r in results_summary if r.get("success"))
+        json_out({
+            "total": len(names),
+            "success_count": ok_count,
+            "fail_count": len(names) - ok_count,
+            "dry_run": dry_run,
+            "results": results_summary,
+        })
+        return
+
+    divider()
+    header("\U0001f4ca 批量转存汇总")
+    cols = ["#", "名称", "状态", "文件数", "尝试", "保存路径"]
+    widths = [4, 20, 8, 7, 6, 32]
+    table_header(cols, widths)
+    for i, r in enumerate(results_summary, 1):
+        if dry_run:
+            status = colorize("DRY", Color.YELLOW)
+            count = str(r.get("candidates", 0))
+        elif r.get("success"):
+            status = colorize("✔ 成功", Color.GREEN)
+            count = str(r.get("saved_count", 0))
+        else:
+            status = colorize("✗ 失败", Color.RED)
+            count = "-"
+        table_row(
+            [str(i), r["name"][:18], status, count,
+             str(r.get("attempts", "-")), r.get("save_path", "")[:30]],
+            widths,
+        )
+
+    ok_count = sum(1 for r in results_summary if r.get("success"))
+    print()
+    print("  总计 {} 部 | 成功 {} | 失败 {}".format(
+        len(names), ok_count, len(names) - ok_count))
+
+
+
 # ──────────────────────────────────────────────
 # media auto-save (自动搜索转存)
 # ──────────────────────────────────────────────
@@ -1328,10 +1724,14 @@ def handle(args):
         _handle_meta(args)
     elif action == "discover":
         _handle_discover(args)
+    elif action == "person":
+        _handle_person(args)
+    elif action == "batch-save":
+        _handle_batch_save(args)
     elif action == "auto-save":
         _handle_auto_save(args)
     else:
-        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|auto-save}")
+        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|person|batch-save|auto-save}")
         print()
         print("  影视媒体中心管理 (支持 fnOS / Emby / Jellyfin / TMDB / 豆瓣)")
         print()
@@ -1348,3 +1748,5 @@ def handle(args):
         print("    meta      查询影视元数据 (TMDB/豆瓣)")
         print("    discover  高分影视推荐 (TMDB/豆瓣)")
         print("    auto-save 自动搜索+转存 (一键全流程)")
+        print("    person    演员/人物发现 (搜索演员 + 参演作品)")
+        print("    batch-save 批量搜索+转存 (多部影视一次搞定)")

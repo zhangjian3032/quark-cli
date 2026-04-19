@@ -19,3 +19,4 @@ quark_cli/web/static/
 patches/*.tar.gz
 patch-*.tar.gz
 dist-patches/
+apply-patch-0058.py

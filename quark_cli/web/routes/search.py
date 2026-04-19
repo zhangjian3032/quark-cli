@@ -155,3 +155,139 @@ def rename_preview(data: dict = Body(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── 批量转存 ──
+
+@router.post("/batch-save")
+def batch_save(data: dict = Body(...)):
+    """
+    批量搜索+转存多部影视
+
+    Body: {
+        names: ["流浪地球2", "三体", ...],
+        media_type?: "movie" | "tv",
+        base_path?: "/媒体",
+        max_attempts?: 10,
+        dry_run?: false
+    }
+    """
+    from quark_cli.web.deps import get_config_path
+    from quark_cli.config import ConfigManager
+    from quark_cli.api import QuarkAPI
+    from quark_cli.search import PanSearch
+    from quark_cli.media.autosave import auto_save_pipeline, filter_quark_links, rank_results
+
+    names = data.get("names", [])
+    media_type = data.get("media_type", "movie")
+    base_path = data.get("base_path", "/媒体")
+    max_attempts = data.get("max_attempts", 10)
+    dry_run = data.get("dry_run", False)
+
+    if not names:
+        raise HTTPException(status_code=400, detail="缺少 names 参数")
+    if len(names) > 50:
+        raise HTTPException(status_code=400, detail="单次最多 50 部")
+
+    config_path = get_config_path()
+    cfg = ConfigManager(config_path)
+    cfg.load()
+
+    search_engine = PanSearch(config=cfg)
+
+    # TMDB 源 (可选)
+    tmdb_source = None
+    try:
+        from quark_cli.web.deps import get_tmdb_source
+        tmdb_source = get_tmdb_source()
+    except Exception:
+        pass
+
+    # 夸克客户端
+    quark_client = None
+    if not dry_run:
+        cookies = cfg.data.get("cookies", [])
+        if not cookies:
+            raise HTTPException(status_code=400, detail="未配置夸克 Cookie")
+        quark_client = QuarkAPI(cookies[0])
+        account = quark_client.init()
+        if not account:
+            raise HTTPException(status_code=400, detail="夸克 Cookie 无效或过期")
+
+    results = []
+    for name in names:
+        keywords = [name]
+        save_path = ""
+
+        # TMDB 元数据
+        if tmdb_source:
+            try:
+                from quark_cli.media.discovery.naming import suggest_search_keywords, suggest_save_path
+                sr = tmdb_source.search(name, media_type=media_type, page=1)
+                if not sr.items:
+                    alt = "tv" if media_type == "movie" else "movie"
+                    sr = tmdb_source.search(name, media_type=alt, page=1)
+                if sr.items:
+                    first = sr.items[0]
+                    detail = tmdb_source.get_detail(first.source_id, media_type)
+                    keywords = suggest_search_keywords(detail)
+                    paths = suggest_save_path(detail, base_path=base_path)
+                    if paths:
+                        save_path = paths[0]["path"]
+            except Exception:
+                pass
+
+        if not save_path:
+            type_folder = "电影" if media_type == "movie" else "剧集"
+            save_path = "/{}/{}/{}".format(base_path.strip("/"), type_folder, name)
+
+        if dry_run:
+            all_results = []
+            for kw in keywords:
+                sr = search_engine.search_all(kw)
+                if sr.get("success") and sr.get("results"):
+                    all_results.extend(sr["results"])
+            quark_results = filter_quark_links(all_results)
+            ranked = rank_results(quark_results, keywords)
+            results.append({
+                "name": name,
+                "candidates": len(quark_results),
+                "top_score": ranked[0].get("score", 0) if ranked else 0,
+                "save_path": save_path,
+                "dry_run": True,
+            })
+        else:
+            try:
+                pr = auto_save_pipeline(
+                    quark_client=quark_client,
+                    search_engine=search_engine,
+                    keywords=keywords,
+                    save_path=save_path,
+                    max_attempts=max_attempts,
+                    media_title=name,
+                    media_type=media_type,
+                )
+                results.append({
+                    "name": name,
+                    "success": pr.get("success", False),
+                    "saved_count": pr.get("saved_count", 0),
+                    "save_path": save_path,
+                    "attempts": pr.get("attempts", 0),
+                    "error": pr.get("error", ""),
+                })
+            except Exception as e:
+                results.append({
+                    "name": name,
+                    "success": False,
+                    "error": str(e),
+                    "save_path": save_path,
+                })
+
+    ok_count = sum(1 for r in results if r.get("success"))
+    return {
+        "total": len(names),
+        "success_count": ok_count,
+        "fail_count": len(names) - ok_count,
+        "dry_run": dry_run,
+        "results": results,
+    }

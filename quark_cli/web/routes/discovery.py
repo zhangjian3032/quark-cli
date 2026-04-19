@@ -118,6 +118,40 @@ def discovery_tags(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@router.get("/discovery/person/search")
+def discovery_person_search(
+    q: str = Query(..., min_length=1, description="演员名称"),
+    page: int = Query(1, ge=1),
+    source: Optional[str] = Query(None, description="数据源: tmdb / douban"),
+):
+    """搜索演员/人物"""
+    try:
+        svc = _get_svc(source)
+        return svc.person_search(q, page=page)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/discovery/person/{person_id}/credits")
+def discovery_person_credits(
+    person_id: str,
+    media_type: Optional[str] = Query(None, description="过滤: movie / tv (不传=全部)"),
+    source: Optional[str] = Query(None, description="数据源: tmdb / douban"),
+):
+    """获取演员参演作品列表"""
+    try:
+        svc = _get_svc(source)
+        return svc.person_credits(person_id, media_type=media_type)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/discovery/sources")
 def discovery_sources():
     """获取可用的数据源列表 (含缓存统计)"""
