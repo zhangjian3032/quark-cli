@@ -347,6 +347,79 @@ Web 面板:
     bot_parser.add_argument("--app-secret", help="飞书应用 APP_SECRET")
     bot_parser.add_argument("--base-path", default="/媒体", help="转存基准目录 (默认 /媒体)")
 
+
+
+    # ========== rss (RSS 订阅) ==========
+    rss_parser = subparsers.add_parser("rss", help="RSS 订阅管理 (Feed + 规则 + 自动转存)")
+    rss_sub = rss_parser.add_subparsers(dest="rss_action")
+
+    # rss add
+    rss_add = rss_sub.add_parser("add", help="添加 RSS Feed")
+    rss_add.add_argument("feed_url", help="Feed URL")
+    rss_add.add_argument("--name", default="", help="Feed 名称")
+    rss_add.add_argument("--interval", type=int, default=30, help="检查间隔 (分钟, 默认 30)")
+    rss_add.add_argument("--passkey", default="", help="PT 站 passkey")
+    rss_add.add_argument("--cookie", default="", help="Cookie 认证")
+
+    # rss list
+    rss_sub.add_parser("list", help="列出所有 Feed")
+
+    # rss show
+    rss_show = rss_sub.add_parser("show", help="查看 Feed 详情")
+    rss_show.add_argument("feed_id", help="Feed ID 或名称")
+
+    # rss remove
+    rss_rm = rss_sub.add_parser("remove", help="删除 Feed")
+    rss_rm.add_argument("feed_id", help="Feed ID 或名称")
+
+    # rss enable / disable
+    rss_en = rss_sub.add_parser("enable", help="启用 Feed")
+    rss_en.add_argument("feed_id", help="Feed ID 或名称")
+    rss_dis = rss_sub.add_parser("disable", help="禁用 Feed")
+    rss_dis.add_argument("feed_id", help="Feed ID 或名称")
+
+    # rss test
+    rss_test = rss_sub.add_parser("test", help="测试拉取 Feed (预览条目)")
+    rss_test.add_argument("feed_url", help="Feed URL")
+    rss_test.add_argument("--passkey", default="", help="PT 站 passkey")
+    rss_test.add_argument("--cookie", default="", help="Cookie 认证")
+
+    # rss check
+    rss_check = rss_sub.add_parser("check", help="立即触发检查")
+    rss_check.add_argument("feed_id", nargs="?", default=None, help="Feed ID (不指定则检查全部)")
+    rss_check.add_argument("--dry-run", action="store_true", default=False, help="仅匹配, 不执行动作")
+
+    # rss rule
+    rss_rule = rss_sub.add_parser("rule", help="规则管理")
+    rule_sub = rss_rule.add_subparsers(dest="rule_action")
+
+    rule_add = rule_sub.add_parser("add", help="添加匹配规则")
+    rule_add.add_argument("feed_id", help="Feed ID 或名称")
+    rule_add.add_argument("--name", default="", help="规则名称")
+    rule_add.add_argument("--match", default="", help="匹配正则 (标题)")
+    rule_add.add_argument("--exclude", default="", help="排除正则")
+    rule_add.add_argument("--quality", default="", help="画质正则 (如 4K|1080p)")
+    rule_add.add_argument("--save-path", default="", help="转存路径")
+    rule_add.add_argument("--action", default="auto_save", choices=["auto_save", "notify", "log"],
+                           help="匹配后动作 (默认 auto_save)")
+    rule_add.add_argument("--link-type", default="quark",
+                           choices=["quark", "alipan", "magnet", "enclosure", "web", "any"],
+                           help="优先链接类型 (默认 quark)")
+    rule_add.add_argument("--min-size", type=float, default=None, help="最小大小 (GB)")
+    rule_add.add_argument("--max-size", type=float, default=None, help="最大大小 (GB)")
+
+    rule_list = rule_sub.add_parser("list", help="查看规则列表")
+    rule_list.add_argument("feed_id", help="Feed ID 或名称")
+
+    rule_rm = rule_sub.add_parser("remove", help="删除规则")
+    rule_rm.add_argument("feed_id", help="Feed ID 或名称")
+    rule_rm.add_argument("index", type=int, help="规则索引")
+
+    # rss history
+    rss_hist = rss_sub.add_parser("history", help="查看 RSS 历史记录")
+    rss_hist.add_argument("--limit", type=int, default=20, help="显示条数 (默认 20)")
+
+
     # ========== serve (Web 面板) ==========
     serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
     serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0; Linux 可用 :: 启用 IPv6 双栈)")
@@ -460,6 +533,19 @@ def _try_start_subscribe_scheduler(config_path):
         info("订阅追剧调度器: 启动失败 - {}".format(e))
 
 
+
+def _try_start_rss_scheduler(config_path):
+    """尝试启动 RSS 订阅调度器"""
+    try:
+        from quark_cli.rss.manager import try_start_rss_scheduler
+        sched = try_start_rss_scheduler(config_path)
+        if sched:
+            import logging
+            logging.getLogger('quark_cli').info('RSS 调度器已启动')
+    except Exception:
+        pass
+
+
 def _serve(args):
     """启动 FastAPI Web 服务"""
     try:
@@ -530,6 +616,10 @@ def _serve(args):
     # 尝试启动 Cookie 保活
     if not reload:
         _try_start_keepalive(config_path)
+
+    # 尝试启动 RSS 订阅调度器
+    if not reload:
+        _try_start_rss_scheduler(config_path)
 
     # 自动打开浏览器
     if not no_open and not reload:
@@ -615,7 +705,7 @@ def main():
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
     from quark_cli.commands import media_cmd
-    from quark_cli.commands import sync_cmd
+    from quark_cli.commands import sync_cmd, rss_cmd
 
     # serve 命令特殊处理 (不通过 handlers dict)
     if args.command == "serve":
@@ -638,6 +728,7 @@ def main():
         "task": task_cmd.handle,
         "media": media_cmd.handle,
         "sync": sync_cmd.handle,
+        "rss": rss_cmd.handle,
     }
 
     handler = handlers.get(args.command)
