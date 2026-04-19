@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle } from 'lucide-react'
+import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle, Database } from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import MediaCard from '../components/MediaCard'
 import { PageSpinner, EmptyState, ErrorBanner, PageHeader, Pagination } from '../components/UI'
@@ -18,6 +18,11 @@ const LIST_TYPES = [
 const MEDIA_TYPES = [
   { key: 'movie', label: '电影' },
   { key: 'tv',    label: '电视剧' },
+]
+
+const SOURCE_TYPES = [
+  { key: 'tmdb',   label: 'TMDB' },
+  { key: 'douban', label: '豆瓣' },
 ]
 
 const RATING_OPTIONS = [
@@ -59,17 +64,21 @@ const SORT_OPTIONS = [
   { key: 'revenue.desc',      label: '票房最高' },
 ]
 
+// 豆瓣排序
+const DOUBAN_SORT_OPTIONS = [
+  { key: 'recommend', label: '综合推荐' },
+  { key: 'time',      label: '最新' },
+  { key: 'rank',      label: '评分' },
+]
+
 /** 生成年份选项 */
 function getYearOptions() {
   const current = new Date().getFullYear()
   const opts = [{ key: '', label: '全部' }]
-  // 今年
   opts.push({ key: String(current), label: '今年' })
-  // 最近几年
   for (let y = current - 1; y >= current - 5; y--) {
     opts.push({ key: String(y), label: String(y) })
   }
-  // 年代
   opts.push({ key: 'decade_2010', label: '2010年代' })
   opts.push({ key: 'decade_2000', label: '2000年代' })
   opts.push({ key: 'decade_1990', label: '1990年代' })
@@ -139,6 +148,7 @@ function TagRow({ label, options, value, onChange, multi = false }) {
    主页面
    ═══════════════════════════════════════════ */
 export default function DiscoverPage() {
+  const [source, setSource] = useState('tmdb')
   const [listType, setListType] = useState('top_rated')
   const [mediaType, setMediaType] = useState('movie')
   const [page, setPage] = useState(1)
@@ -152,35 +162,66 @@ export default function DiscoverPage() {
   const [country, setCountry] = useState('')
   const [year, setYear] = useState('')
   const [sortBy, setSortBy] = useState('vote_average.desc')
+  const [doubanTag, setDoubanTag] = useState('')
 
-  // 类型列表
+  // 类型列表 & 豆瓣标签列表
   const [genreOptions, setGenreOptions] = useState([])
+  const [doubanTags, setDoubanTags] = useState([])
+  const [availableSources, setAvailableSources] = useState([])
+
+  // 初始加载可用数据源
+  useEffect(() => {
+    discoveryApi.sources()
+      .then(d => {
+        setAvailableSources(d.sources || [])
+        // 如果 TMDB 不可用，自动切换到豆瓣
+        const tmdbAvail = (d.sources || []).find(s => s.name === 'tmdb')
+        if (!tmdbAvail || !tmdbAvail.available) {
+          setSource('douban')
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   // 加载类型
   useEffect(() => {
-    discoveryApi.genres(mediaType)
+    discoveryApi.genres(mediaType, source)
       .then(list => setGenreOptions(list.map(g => ({ key: String(g.id), label: g.name }))))
-      .catch(() => {})
-  }, [mediaType])
+      .catch(() => setGenreOptions([]))
+  }, [mediaType, source])
+
+  // 加载豆瓣标签
+  useEffect(() => {
+    if (source === 'douban') {
+      discoveryApi.tags(mediaType, 'douban')
+        .then(d => setDoubanTags(d.tags || []))
+        .catch(() => setDoubanTags([]))
+    } else {
+      setDoubanTags([])
+    }
+  }, [source, mediaType])
+
+  const isDouban = source === 'douban'
 
   const doFetch = (p = 1) => {
     setLoading(true)
     setError(null)
     setPage(p)
 
-    // 随机模式: 用 discover 接口 + 随机页码 + popularity 排序
+    // 随机模式
     if (listType === 'random') {
       const randomPage = Math.floor(Math.random() * 20) + 1
       const params = {
         listType: 'discover',
         mediaType,
         page: randomPage,
-        sortBy: 'popularity.desc',
+        source,
+        sortBy: isDouban ? 'recommend' : 'popularity.desc',
       }
-      // 应用筛选条件 (如果有的话)
       if (minRating) params.minRating = parseFloat(minRating)
       if (genres.length > 0) params.genre = genres.join(',')
       if (country) params.country = country
+      if (isDouban && doubanTag) params.tag = doubanTag
       if (year) {
         params.year = year.startsWith('decade_') ? parseInt(year.replace('decade_', '')) : parseInt(year)
       }
@@ -190,21 +231,23 @@ export default function DiscoverPage() {
       return
     }
 
-    const params = { listType, mediaType, page: p }
+    const params = { listType, mediaType, page: p, source }
 
     if (listType === 'discover') {
       if (minRating) params.minRating = parseFloat(minRating)
       if (genres.length > 0) params.genre = genres.join(',')
       if (country) params.country = country
-      if (sortBy) params.sortBy = sortBy
-
-      // 年份 / 年代
-      if (year) {
-        if (year.startsWith('decade_')) {
-          const decade = parseInt(year.replace('decade_', ''))
-          params.year = decade
-        } else {
-          params.year = parseInt(year)
+      if (isDouban) {
+        if (doubanTag) params.tag = doubanTag
+        if (sortBy) params.sortBy = sortBy
+      } else {
+        if (sortBy) params.sortBy = sortBy
+        if (year) {
+          if (year.startsWith('decade_')) {
+            params.year = parseInt(year.replace('decade_', ''))
+          } else {
+            params.year = parseInt(year)
+          }
         }
       }
     }
@@ -214,42 +257,70 @@ export default function DiscoverPage() {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
-  // 非 discover 模式切换时自动刷新 (包括 random)
+  // 非 discover 模式切换时自动刷新
   useEffect(() => {
     if (listType !== 'discover') {
       doFetch(1)
     }
-  }, [listType, mediaType])
+  }, [listType, mediaType, source])
 
-  // discover 模式: 初次进入时触发一次
+  // discover 模式: 初次进入时触发
   useEffect(() => {
     if (listType === 'discover') {
       doFetch(1)
     }
   }, [listType])
 
+  const handleSourceChange = (s) => {
+    setSource(s)
+    setGenres([])
+    setDoubanTag('')
+    setCountry('')
+    setYear('')
+    setSortBy(s === 'douban' ? 'recommend' : 'vote_average.desc')
+  }
+
   const handleReset = () => {
     setMinRating('')
     setGenres([])
     setCountry('')
     setYear('')
-    setSortBy('vote_average.desc')
+    setDoubanTag('')
+    setSortBy(isDouban ? 'recommend' : 'vote_average.desc')
   }
 
-  const hasFilters = minRating || genres.length > 0 || country || year || sortBy !== 'vote_average.desc'
+  const hasFilters = minRating || genres.length > 0 || country || year || doubanTag
+    || sortBy !== (isDouban ? 'recommend' : 'vote_average.desc')
+
+  const sourceLabel = isDouban ? '豆瓣' : 'TMDB'
 
   return (
     <>
-      <PageHeader title="影视发现" description="TMDB 高分推荐与趋势" />
+      <PageHeader
+        title="影视发现"
+        description={`${sourceLabel} 高分推荐与趋势`}
+      />
 
       {/* ── 筛选面板 ── */}
       <div className="card mb-6 overflow-hidden">
+        {/* 数据源 */}
+        <TagRow
+          label="数据源"
+          options={SOURCE_TYPES.map(s => {
+            const info = availableSources.find(a => a.name === s.key)
+            const avail = !info || info.available
+            return { key: s.key, label: avail ? s.label : `${s.label} (未配置)` }
+          })}
+          value={source}
+          onChange={handleSourceChange}
+        />
+
         {/* 影视类型 */}
         <TagRow
           label="影视类型"
           options={MEDIA_TYPES}
           value={mediaType}
-          onChange={(v) => { setMediaType(v); setGenres([]) }}
+          onChange={(v) => { setMediaType(v); setGenres([]); setDoubanTag('') }}
         />
 
         {/* 列表类型 */}
@@ -260,10 +331,20 @@ export default function DiscoverPage() {
           onChange={setListType}
         />
 
-        {/* ── discover 模式才显示以下筛选项 ── */}
+        {/* ── discover / random 模式才显示以下筛选项 ── */}
         {(listType === 'discover' || listType === 'random') && (
           <>
-            {/* 类型 */}
+            {/* 豆瓣标签 (仅豆瓣) */}
+            {isDouban && doubanTags.length > 0 && (
+              <TagRow
+                label="标签"
+                options={[{ key: '', label: '全部' }, ...doubanTags.map(t => ({ key: t, label: t }))]}
+                value={doubanTag}
+                onChange={setDoubanTag}
+              />
+            )}
+
+            {/* 类型 (多选) */}
             {genreOptions.length > 0 && (
               <TagRow
                 label="类型"
@@ -282,26 +363,30 @@ export default function DiscoverPage() {
               onChange={setMinRating}
             />
 
-            {/* 国家地区 */}
-            <TagRow
-              label="国家和地区"
-              options={COUNTRY_OPTIONS}
-              value={country}
-              onChange={setCountry}
-            />
+            {/* 国家地区 (TMDB 模式) */}
+            {!isDouban && (
+              <TagRow
+                label="国家和地区"
+                options={COUNTRY_OPTIONS}
+                value={country}
+                onChange={setCountry}
+              />
+            )}
 
-            {/* 发行年份 */}
-            <TagRow
-              label="发行年份"
-              options={YEAR_OPTIONS}
-              value={year}
-              onChange={setYear}
-            />
+            {/* 发行年份 (TMDB 模式) */}
+            {!isDouban && (
+              <TagRow
+                label="发行年份"
+                options={YEAR_OPTIONS}
+                value={year}
+                onChange={setYear}
+              />
+            )}
 
             {/* 排序 */}
             <TagRow
               label="排序"
-              options={SORT_OPTIONS}
+              options={isDouban ? DOUBAN_SORT_OPTIONS : SORT_OPTIONS}
               value={sortBy}
               onChange={setSortBy}
             />
@@ -338,11 +423,12 @@ export default function DiscoverPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {data.items.map(item => (
               <MediaCard
-                key={item.tmdb_id}
-                item={{ ...item, guid: item.tmdb_id }}
+                key={item.source_id || item.tmdb_id || item.douban_id}
+                item={item}
                 posterUrl={item.poster_url}
                 showType
                 tmdbMode
+                source={data.source || source}
               />
             ))}
           </div>

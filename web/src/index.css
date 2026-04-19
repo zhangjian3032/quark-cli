@@ -23,6 +23,11 @@
     max-width: 100vw;
   }
 
+
+  /* Checkbox 暗色主题适配 */
+  input[type="checkbox"] {
+    accent-color: #6366f1;
+  }
   /* 移动端触控友好: 最小点击区域 */
   @media (max-width: 640px) {
     button, a, [role="button"] {

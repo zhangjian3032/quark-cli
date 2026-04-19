@@ -16,6 +16,7 @@ function TaskEditor({ task, onSave, onClose, genres }) {
     name: '',
     enabled: true,
     interval_minutes: 360,
+    source: 'tmdb',
     media_type: 'movie',
     count: 3,
     filters: {},
@@ -98,6 +99,19 @@ function TaskEditor({ task, onSave, onClose, genres }) {
             </div>
           </div>
 
+          {/* 数据源 */}
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">数据源</label>
+            <select
+              value={form.source || 'tmdb'}
+              onChange={e => set('source', e.target.value)}
+              className="input text-sm w-full"
+            >
+              <option value="tmdb">TMDB</option>
+              <option value="douban">豆瓣</option>
+            </select>
+          </div>
+
           {/* 数量 + 保存路径 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -161,6 +175,16 @@ function TaskEditor({ task, onSave, onClose, genres }) {
                   value={form.filters.year || ''}
                   onChange={e => setFilter('year', e.target.value ? Number(e.target.value) : undefined)}
                   placeholder="如 2024"
+                  className="input text-xs w-full"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-600 mb-1 block">豆瓣标签</label>
+                <input
+                  type="text"
+                  value={form.filters.tag || ''}
+                  onChange={e => setFilter('tag', e.target.value)}
+                  placeholder="如 热门/科幻/华语"
                   className="input text-xs w-full"
                 />
               </div>
@@ -290,6 +314,11 @@ function TaskCard({ task, index, status, onToggle, onTrigger, onEdit, onDelete }
             )}
           </div>
           <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
+            {task.source && task.source !== 'tmdb' && (
+              <span className="px-1 py-0.5 rounded bg-green-500/10 text-green-400">
+                {task.source === 'douban' ? '豆瓣' : task.source}
+              </span>
+            )}
             <span className="flex items-center gap-1">
               {task.media_type === 'tv' ? <Tv size={10} /> : <Film size={10} />}
               {task.media_type === 'tv' ? '剧集' : '电影'}
@@ -365,6 +394,11 @@ function TaskCard({ task, index, status, onToggle, onTrigger, onEdit, onDelete }
           {task.filters.year && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400">
               {task.filters.year}
+            </span>
+          )}
+          {task.filters.tag && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-400">
+              标签: {task.filters.tag}
             </span>
           )}
           {task.filters.country && (
@@ -553,7 +587,7 @@ export default function SchedulerPage() {
 
   return (
     <>
-      <PageHeader title="定时任务" description="自动从 TMDB 发现影视 → 搜索网盘 → 转存" />
+      <PageHeader title="定时任务" description="自动从 TMDB/豆瓣 发现影视 → 搜索网盘 → 转存" />
 
       {error && <ErrorBanner message={error} />}
 
@@ -610,7 +644,7 @@ export default function SchedulerPage() {
           <Clock size={40} className="mx-auto mb-3 text-gray-700" />
           <p className="text-gray-400 mb-1">还没有定时任务</p>
           <p className="text-xs text-gray-600 mb-4">
-            创建一个定时任务，自动从 TMDB 随机发现影视并搜索转存到网盘
+            创建一个定时任务，自动从 TMDB/豆瓣 随机发现影视并搜索转存到网盘
           </p>
           <button
             onClick={() => { setEditingIndex(null); setShowEditor(true) }}

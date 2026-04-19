@@ -6,16 +6,26 @@ from quark_cli.config import ConfigManager
 
 _config_path = None
 
+# 缓存的数据源实例 (避免每次请求重建缓存)
+_cached_sources = {}
+
 
 def set_config_path(path):
-    global _config_path
+    global _config_path, _cached_sources
     _config_path = path
+    _cached_sources = {}
     get_config.cache_clear()
 
 
 @lru_cache()
 def get_config():
     return ConfigManager(config_path=_config_path)
+
+
+def _get_cache_config():
+    """读取缓存配置"""
+    cfg = get_config()
+    return cfg.data.get("media", {}).get("discovery", {}).get("cache", {})
 
 
 # ── 夸克网盘 ──
@@ -86,9 +96,54 @@ def get_tmdb_source():
     )
 
 
-def get_discovery_service():
+# ── 豆瓣发现 ──
+
+def get_douban_source():
+    from quark_cli.media.discovery.douban import DoubanSource
+    return DoubanSource()
+
+
+# ── 统一发现服务 (带缓存) ──
+
+def get_discovery_source(source_name=None):
+    """
+    根据 source 名称返回对应的数据源实例 (带缓存包装)。
+    source_name: "tmdb" / "douban" / None (自动选择)
+    """
+    from quark_cli.media.discovery.cache import wrap_with_cache
+
+    # 确定实际 source_name
+    actual_name = source_name
+    if actual_name == "douban":
+        raw = get_douban_source()
+    elif actual_name == "tmdb":
+        raw = get_tmdb_source()
+        if not raw:
+            return None
+    else:
+        raw = get_tmdb_source()
+        if raw:
+            actual_name = "tmdb"
+        else:
+            raw = get_douban_source()
+            actual_name = "douban"
+
+    if raw is None:
+        return None
+
+    # 复用已缓存的包装实例 (同一 source_name 共享缓存)
+    if actual_name in _cached_sources:
+        return _cached_sources[actual_name]
+
+    cache_cfg = _get_cache_config()
+    wrapped = wrap_with_cache(raw, cache_cfg)
+    _cached_sources[actual_name] = wrapped
+    return wrapped
+
+
+def get_discovery_service(source_name=None):
     from quark_cli.services.discovery_service import DiscoveryService
-    source = get_tmdb_source()
+    source = get_discovery_source(source_name)
     if not source:
         return None
     return DiscoveryService(source)

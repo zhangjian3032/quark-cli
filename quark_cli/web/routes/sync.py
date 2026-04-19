@@ -259,13 +259,21 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
         try:
             from quark_cli.history import record as history_record
             h_status = "success" if progress.status == "done" else "error"
+            # 收集已拷贝的文件名
+            copied_names = [fp.filename for fp in progress.files if fp.status == "done"]
+            file_hint = ""
+            if copied_names:
+                shown = copied_names[:5]
+                file_hint = " | " + ", ".join(shown)
+                if len(copied_names) > 5:
+                    file_hint += " 等{}个".format(len(copied_names))
             history_record(
                 record_type="sync",
                 name=task_name,
                 status=h_status,
-                summary="拷贝 {} / 跳过 {} ({})".format(
+                summary="拷贝 {} / 跳过 {} ({}){}".format(
                     p.get("copied_files", 0), p.get("skipped_files", 0),
-                    p.get("speed_human", "")),
+                    p.get("speed_human", ""), file_hint),
                 detail=p,
                 duration=p.get("elapsed", 0),
             )
@@ -278,9 +286,11 @@ def _schedule_bot_notify_after_sync(cfg, task_name):
             "failed": [],
         }
         if progress.status == "done":
+            filenames = [fp.filename for fp in progress.files if fp.status == "done"]
             result["saved"] = [{"title": "文件同步完成", "year": "",
                                 "save_path": p.get("dest_dir", ""),
-                                "saved_count": p.get("copied_files", 0)}]
+                                "saved_count": p.get("copied_files", 0),
+                                "filenames": filenames}]
         elif progress.status == "error":
             result["failed"] = [{"title": "文件同步失败", "year": "",
                                  "error": "; ".join(p.get("errors", [])[:3])}]

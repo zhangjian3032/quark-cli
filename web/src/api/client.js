@@ -119,14 +119,19 @@ export const mediaApi = {
   playing:     ()                      => request('/media/playing'),
 }
 
-// ── Discovery (TMDB) ──
+// ── Discovery (TMDB / 豆瓣) ──
 export const discoveryApi = {
-  meta:    (q, type='movie', year=null) => {
+  meta:    (q, type='movie', year=null, source=null) => {
     let url = `/discovery/meta?query=${encodeURIComponent(q)}&media_type=${type}`
     if (year) url += `&year=${year}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
     return request(url)
   },
-  metaById: (id, type='movie')         => request(`/discovery/meta/${id}?media_type=${type}`),
+  metaById: (id, type='movie', source=null) => {
+    let url = `/discovery/meta/${id}?media_type=${type}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
+    return request(url)
+  },
   list:    (params = {})               => {
     const qs = new URLSearchParams({
       list_type: params.listType || 'top_rated',
@@ -137,10 +142,22 @@ export const discoveryApi = {
       ...(params.year ? { year: String(params.year) } : {}),
       ...(params.country ? { country: params.country } : {}),
       ...(params.sortBy ? { sort_by: params.sortBy } : {}),
+      ...(params.source ? { source: params.source } : {}),
+      ...(params.tag ? { tag: params.tag } : {}),
     })
     return request(`/discovery/list?${qs}`)
   },
-  genres:  (type='movie')              => request(`/discovery/genres?media_type=${type}`),
+  genres:  (type='movie', source=null) => {
+    let url = `/discovery/genres?media_type=${type}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
+    return request(url)
+  },
+  tags:    (type='movie', source=null) => {
+    let url = `/discovery/tags?media_type=${type}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
+    return request(url)
+  },
+  sources: () => request('/discovery/sources'),
 }
 
 // ── Health ──

@@ -389,15 +389,19 @@ export default function DrivePage() {
               onClick={() => handleItemClick(item)}
             >
               {/* Checkbox */}
-              <div className="flex justify-center">
+              <label
+                className="flex justify-center items-center cursor-pointer h-full"
+                onClick={e => e.stopPropagation()}
+              >
                 <input
                   type="checkbox"
                   checked={selected.has(item.fid)}
                   onChange={e => toggleSelect(item.fid, e)}
-                  className="w-4 h-4 rounded border-gray-600 bg-surface-3 text-brand-500
-                             focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
+                  className="w-4 h-4 rounded border-gray-600 bg-surface-3
+                             focus:ring-brand-500 focus:ring-offset-0 cursor-pointer
+                             "
                 />
-              </div>
+              </label>
 
               {/* Name */}
               <div className="flex items-center gap-2.5 min-w-0">

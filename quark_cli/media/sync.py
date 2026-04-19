@@ -118,6 +118,18 @@ class SyncProgress:
             "speed_human": _format_speed(self.speed),
             "errors": self.errors[-10:],  # 最后 10 条错误
         }
+        # 已拷贝的文件列表 (含文件名和大小)
+        copied_list = []
+        for fp in self.files:
+            if fp.status == "done":
+                copied_list.append({
+                    "filename": fp.filename,
+                    "size": fp.size,
+                    "size_human": _format_size(fp.size),
+                })
+        if copied_list:
+            d["copied_file_list"] = copied_list
+
         if self.current_file:
             d["current_file"] = {
                 "filename": self.current_file.filename,
@@ -851,13 +863,22 @@ class SyncScheduler:
                 try:
                     from quark_cli.history import record as history_record
                     h_status = "success" if result.error_files == 0 else "partial"
+                    # 收集已拷贝的文件名
+                    copied_names = [fp.filename for fp in result.files if fp.status == "done"]
+                    file_hint = ""
+                    if copied_names:
+                        shown = copied_names[:5]
+                        file_hint = " | " + ", ".join(shown)
+                        if len(copied_names) > 5:
+                            file_hint += " 等{}个".format(len(copied_names))
                     history_record(
                         record_type="sync",
                         name=name,
                         status=h_status,
-                        summary="拷贝 {} / 跳过 {} / 失败 {} ({})".format(
+                        summary="拷贝 {} / 跳过 {} / 失败 {} ({}){}".format(
                             result.copied_files, result.skipped_files,
-                            result.error_files, result.speed_human or ""),
+                            result.error_files, _format_speed(result.speed),
+                            file_hint),
                         detail=result.to_dict(),
                         duration=result.elapsed,
                         config_path=self.config_path,
@@ -903,11 +924,14 @@ class SyncScheduler:
             }
 
             if progress.status == "done" and progress.copied_files > 0:
+                # 收集已拷贝的文件名列表
+                filenames = [fp.filename for fp in progress.files if fp.status == "done"]
                 result["saved"] = [{
                     "title": "文件同步",
                     "year": "",
                     "save_path": str(progress.dest_dir),
                     "saved_count": progress.copied_files,
+                    "filenames": filenames,
                 }]
             elif progress.error_files > 0 or progress.status == "error":
                 result["failed"] = [{
@@ -934,11 +958,13 @@ class SyncScheduler:
             failed_items = []
             for name, progress in results:
                 if progress.status == "done" and progress.copied_files > 0:
+                    filenames = [fp.filename for fp in progress.files if fp.status == "done"]
                     saved_items.append({
                         "title": name,
                         "year": "",
                         "save_path": str(progress.dest_dir),
                         "saved_count": progress.copied_files,
+                        "filenames": filenames,
                     })
                 elif progress.error_files > 0 or progress.status == "error":
                     failed_items.append({

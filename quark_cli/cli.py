@@ -244,29 +244,37 @@ Web 面板:
     # media playing
     media_sub.add_parser("playing", help="查看继续观看列表")
 
-    # media meta  (TMDB 元数据查询)
-    mm = media_sub.add_parser("meta", help="查询影视元数据 (TMDB)")
+    # media meta  (影视元数据查询)
+    mm = media_sub.add_parser("meta", help="查询影视元数据 (TMDB/豆瓣)")
     mm.add_argument("query", nargs="?", help="搜索关键词 (如 '流浪地球2')")
     mm.add_argument("--tmdb", help="直接指定 TMDB ID")
     mm.add_argument("--imdb", help="直接指定 IMDb ID")
+    mm.add_argument("--douban", help="直接指定豆瓣 ID")
+    mm.add_argument("-s", "--source", default="auto",
+                     choices=["auto", "tmdb", "douban"],
+                     help="数据源 (默认 auto: 优先 TMDB, 无 key 回退豆瓣)")
     mm.add_argument("-t", "--type", default="movie", choices=["movie", "tv"], help="类型 (默认 movie)")
     mm.add_argument("-y", "--year", type=int, help="年份过滤")
     mm.add_argument("--base-path", default="/媒体", help="保存路径基准目录 (默认 /媒体)")
 
     # media discover  (高分影视推荐)
-    md = media_sub.add_parser("discover", help="高分影视推荐 (TMDB)")
+    md = media_sub.add_parser("discover", help="高分影视推荐 (TMDB/豆瓣)")
     md.add_argument("--list", dest="list_type", default="top_rated",
                      choices=["popular", "top_rated", "trending", "discover"],
                      help="推荐列表类型 (默认 top_rated)")
+    md.add_argument("-s", "--source", default="auto",
+                     choices=["auto", "tmdb", "douban"],
+                     help="数据源 (默认 auto: 优先 TMDB, 无 key 回退豆瓣)")
     md.add_argument("-t", "--type", default="movie", choices=["movie", "tv"], help="类型 (默认 movie)")
     md.add_argument("-p", "--page", type=int, default=1, help="页码")
     md.add_argument("--min-rating", type=float, help="最低评分 (如 8.0)")
     md.add_argument("--genre", help="类型过滤 (逗号分隔, 如 '动作,科幻' 或 TMDB genre_id)")
+    md.add_argument("--tag", help="豆瓣标签 (如 '热门','科幻','美剧', 仅 --source douban)")
     md.add_argument("-y", "--year", type=int, help="年份")
     md.add_argument("--country", help="国家/地区代码 (如 CN, US, JP)")
     md.add_argument("--sort-by", default="vote_average.desc",
-                     help="排序方式 (默认 vote_average.desc)")
-    md.add_argument("--min-votes", type=int, default=50, help="最低票数 (默认 50)")
+                     help="排序方式 (TMDB: vote_average.desc | 豆瓣: recommend/time/rank)")
+    md.add_argument("--min-votes", type=int, default=50, help="最低票数 (默认 50, 仅 TMDB)")
     md.add_argument("--window", default="week", choices=["day", "week"],
                      help="趋势时间窗口 (仅 trending 有效, 默认 week)")
 

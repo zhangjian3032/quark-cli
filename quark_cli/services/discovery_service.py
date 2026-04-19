@@ -1,14 +1,18 @@
-"""Service 层 - TMDB 影视发现业务逻辑 (三端共用)"""
+"""Service 层 - 影视发现业务逻辑 (支持多数据源: TMDB / 豆瓣)"""
 
 
 class DiscoveryService:
-    """TMDB 元数据查询 + 高分推荐 Service"""
+    """元数据查询 + 高分推荐 Service"""
 
-    def __init__(self, tmdb_source):
-        self._source = tmdb_source
+    def __init__(self, source):
+        self._source = source
+
+    @property
+    def source_name(self):
+        return self._source.source_name
 
     def meta_search(self, query, media_type="movie", year=None, base_path="/媒体"):
-        """按关键词搜索 TMDB 元数据，返回完整详情 + 建议"""
+        """按关键词搜索元数据，返回完整详情 + 建议"""
         from quark_cli.media.discovery.naming import (
             suggest_search_keywords, suggest_save_path, format_meta_summary,
         )
@@ -28,10 +32,11 @@ class DiscoveryService:
         first = result.items[0]
         item = self._source.get_detail(first.source_id, actual_type)
 
-        # resolve genre ids
+        # resolve genre ids (TMDB 列表页只返回 genre_ids)
         if item.genres and isinstance(item.genres[0], int):
             try:
-                item.genres = self._source.resolve_genre_names(item.genres, actual_type)
+                if hasattr(self._source, "resolve_genre_names"):
+                    item.genres = self._source.resolve_genre_names(item.genres, actual_type)
             except Exception:
                 pass
 
@@ -44,16 +49,21 @@ class DiscoveryService:
         if item.backdrop_path:
             summary["backdrop_url"] = self._source.get_poster_url(item.backdrop_path, "w1280")
 
+        # 来源信息
+        summary["source"] = self._source.source_name
+        summary["source_id"] = item.source_id
+
         other_results = []
         for it in result.items[1:6]:
             other_results.append({
-                "tmdb_id": it.source_id,
+                "source_id": it.source_id,
                 "title": it.title,
                 "year": it.year,
                 "rating": it.rating,
             })
 
         return {
+            "source": self._source.source_name,
             "meta": summary,
             "media_type": actual_type,
             "search_keywords": keywords,
@@ -61,15 +71,17 @@ class DiscoveryService:
             "other_results": other_results,
         }
 
-    def meta_by_tmdb_id(self, tmdb_id, media_type="movie", base_path="/媒体"):
+    def meta_by_id(self, source_id, media_type="movie", base_path="/媒体"):
+        """通过 source_id 获取详情 (兼容 tmdb_id / douban_id)"""
         from quark_cli.media.discovery.naming import (
             suggest_search_keywords, suggest_save_path, format_meta_summary,
         )
 
-        item = self._source.get_detail(tmdb_id, media_type)
+        item = self._source.get_detail(source_id, media_type)
         if item.genres and isinstance(item.genres[0], int):
             try:
-                item.genres = self._source.resolve_genre_names(item.genres, media_type)
+                if hasattr(self._source, "resolve_genre_names"):
+                    item.genres = self._source.resolve_genre_names(item.genres, media_type)
             except Exception:
                 pass
 
@@ -82,25 +94,37 @@ class DiscoveryService:
         if item.backdrop_path:
             summary["backdrop_url"] = self._source.get_poster_url(item.backdrop_path, "w1280")
 
+        summary["source"] = self._source.source_name
+        summary["source_id"] = item.source_id
+
         return {
+            "source": self._source.source_name,
             "meta": summary,
             "media_type": media_type,
             "search_keywords": keywords,
             "save_paths": paths,
         }
 
+    # 保持向后兼容
+    def meta_by_tmdb_id(self, tmdb_id, media_type="movie", base_path="/媒体"):
+        return self.meta_by_id(tmdb_id, media_type, base_path)
+
     def discover(self, list_type="top_rated", media_type="movie", page=1,
                  min_rating=None, genre=None, year=None, country=None,
-                 sort_by="vote_average.desc", min_votes=50, window="week"):
+                 sort_by="vote_average.desc", min_votes=50, window="week",
+                 tag=None):
         """高分影视推荐列表"""
-        # genre 中文 → id
+
+        # genre 中文 → id (仅 TMDB 需要)
         genre_ids = None
-        if genre:
+        if genre and hasattr(self._source, "resolve_genre_ids"):
             parts = [g.strip() for g in genre.split(",")]
             if all(p.isdigit() for p in parts):
                 genre_ids = genre
             else:
                 genre_ids = self._source.resolve_genre_ids(parts, media_type)
+        elif genre:
+            genre_ids = genre
 
         if list_type == "popular":
             result = self._source.get_popular(media_type, page)
@@ -108,6 +132,10 @@ class DiscoveryService:
             result = self._source.get_top_rated(media_type, page)
         elif list_type == "trending":
             result = self._source.get_trending(media_type, window)
+        elif list_type == "collection" and hasattr(self._source, "get_collection"):
+            # 豆瓣合集直接访问
+            coll_name = tag or "movie_real_time_hotest"
+            result = self._source.get_collection(coll_name, media_type, page)
         else:
             filters = {"sort_by": sort_by, "min_votes": min_votes}
             if min_rating is not None:
@@ -118,20 +146,24 @@ class DiscoveryService:
                 filters["year"] = year
             if country:
                 filters["country"] = country
+            # 豆瓣特有: tag
+            if tag:
+                filters["tag"] = tag
             result = self._source.discover(media_type, page, **filters)
 
         # resolve genres
         for it in result.items:
             if it.genres and isinstance(it.genres[0], int):
                 try:
-                    it.genres = self._source.resolve_genre_names(it.genres, media_type)
+                    if hasattr(self._source, "resolve_genre_names"):
+                        it.genres = self._source.resolve_genre_names(it.genres, media_type)
                 except Exception:
                     pass
 
         items = []
         for it in result.items:
-            items.append({
-                "tmdb_id": it.source_id,
+            item_dict = {
+                "source_id": it.source_id,
                 "title": it.title,
                 "original_title": it.original_title,
                 "year": it.year,
@@ -140,9 +172,16 @@ class DiscoveryService:
                 "genres": it.genres,
                 "overview": (it.overview or "")[:200],
                 "poster_url": self._source.get_poster_url(it.poster_path) if it.poster_path else "",
-            })
+            }
+            # 向后兼容: TMDB 时同时输出 tmdb_id
+            if self._source.source_name == "tmdb":
+                item_dict["tmdb_id"] = it.source_id
+            elif self._source.source_name == "douban":
+                item_dict["douban_id"] = it.source_id
+            items.append(item_dict)
 
         return {
+            "source": self._source.source_name,
             "list_type": list_type,
             "media_type": media_type,
             "page": result.page,
@@ -154,3 +193,9 @@ class DiscoveryService:
     def get_genres(self, media_type="movie"):
         genres_map = self._source.get_genres(media_type)
         return [{"id": k, "name": v} for k, v in sorted(genres_map.items())]
+
+    def get_available_tags(self, media_type="movie"):
+        """获取可用标签 (豆瓣特有)"""
+        if hasattr(self._source, "get_available_tags"):
+            return self._source.get_available_tags(media_type)
+        return []

@@ -1,7 +1,6 @@
 /**
- * TMDB 影片详情页 — 从「发现」或「元数据」跳入
- * 路由: /discover/:tmdbId?type=movie
- * 提供: 完整元数据 + 搜索关键词 + 推荐路径 + 一键跳转搜索转存
+ * 影片详情页 — 从「发现」跳入 (支持 TMDB / 豆瓣)
+ * 路由: /discover/:id?type=movie&source=tmdb
  */
 import { useState, useEffect } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
@@ -20,6 +19,7 @@ export default function TmdbDetailPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const mediaType = searchParams.get('type') || 'movie'
+  const source = searchParams.get('source') || null
 
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -28,12 +28,12 @@ export default function TmdbDetailPage() {
   useEffect(() => {
     setLoading(true)
     setError(null)
-    discoveryApi.metaById(tmdbId, mediaType)
+    discoveryApi.metaById(tmdbId, mediaType, source)
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
-  }, [tmdbId, mediaType])
+  }, [tmdbId, mediaType, source])
 
-  /** 跳转到搜索转存页，携带关键词 + 推荐路径 */
+  /** 跳转到搜索转存页 */
   const goSearch = (keyword, savePath) => {
     const params = new URLSearchParams({ keyword })
     if (savePath) params.set('path', savePath)
@@ -48,6 +48,8 @@ export default function TmdbDetailPage() {
   const keywords = data.search_keywords || []
   const paths = data.save_paths || []
   const defaultPath = paths[0]?.path || ''
+  const isDouban = (data.source || source) === 'douban'
+  const sourceId = m.source_id || m.tmdb_id || m.douban_id || tmdbId
 
   return (
     <>
@@ -87,7 +89,7 @@ export default function TmdbDetailPage() {
                 {m.rating > 0 && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium
                                    bg-amber-500/15 text-amber-400 border border-amber-500/20">
-                    <Star size={12} className="fill-amber-400" /> {m.rating} ({m.vote_count})
+                    <Star size={12} className="fill-amber-400" /> {m.rating} {m.vote_count ? `(${m.vote_count})` : ''}
                   </span>
                 )}
                 {m.year && (
@@ -115,13 +117,28 @@ export default function TmdbDetailPage() {
                 ))}
               </div>
 
-              <div className="flex gap-4 mt-3 text-xs text-gray-500">
-                <span>TMDB: {m.tmdb_id}</span>
-                {m.imdb_id && (
-                  <a href={`https://www.imdb.com/title/${m.imdb_id}/`} target="_blank" rel="noreferrer"
-                    className="hover:text-gray-300 flex items-center gap-1">
-                    IMDb: {m.imdb_id} <ExternalLink size={10} />
-                  </a>
+              <div className="flex gap-4 mt-3 text-xs text-gray-500 flex-wrap">
+                {/* 来源标识 */}
+                {isDouban ? (
+                  <>
+                    <span className="text-green-500">豆瓣: {sourceId}</span>
+                    {m.extra?.douban_url && (
+                      <a href={m.extra.douban_url} target="_blank" rel="noreferrer"
+                        className="hover:text-gray-300 flex items-center gap-1">
+                        豆瓣页面 <ExternalLink size={10} />
+                      </a>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span>TMDB: {m.tmdb_id || sourceId}</span>
+                    {m.imdb_id && (
+                      <a href={`https://www.imdb.com/title/${m.imdb_id}/`} target="_blank" rel="noreferrer"
+                        className="hover:text-gray-300 flex items-center gap-1">
+                        IMDb: {m.imdb_id} <ExternalLink size={10} />
+                      </a>
+                    )}
+                  </>
                 )}
                 {m.status && <span>状态: {m.status}</span>}
               </div>
@@ -170,7 +187,7 @@ export default function TmdbDetailPage() {
           </div>
         )}
 
-        {/* 搜索关键词 + 一键跳转 */}
+        {/* 搜索关键词 */}
         <div className="text-xs text-gray-500 mb-2">点击关键词跳转到搜索转存</div>
         <div className="space-y-1.5">
           {keywords.map((kw, i) => (
@@ -188,23 +205,30 @@ export default function TmdbDetailPage() {
         </div>
       </div>
 
-      {/* ── 其他匹配 (如果是从 meta_search 过来的) ── */}
+      {/* ── 其他匹配 ── */}
       {data.other_results?.length > 0 && (
         <div className="card p-5">
           <h3 className="font-semibold text-white mb-3">其他匹配</h3>
           <div className="space-y-1">
-            {data.other_results.map((r, i) => (
-              <button key={i}
-                onClick={() => navigate(`/discover/${r.tmdb_id}?type=${data.media_type}`)}
-                className="w-full flex items-center justify-between text-sm py-2 px-2
-                           rounded hover:bg-surface-2 transition-colors text-left">
-                <span className="text-gray-300">{r.title} ({r.year})</span>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-amber-400">★ {r.rating}</span>
-                  <ArrowRight size={12} className="text-gray-600" />
-                </div>
-              </button>
-            ))}
+            {data.other_results.map((r, i) => {
+              const rid = r.source_id || r.tmdb_id || r.douban_id
+              return (
+                <button key={i}
+                  onClick={() => {
+                    let url = `/discover/${rid}?type=${data.media_type}`
+                    if (data.source) url += `&source=${data.source}`
+                    navigate(url)
+                  }}
+                  className="w-full flex items-center justify-between text-sm py-2 px-2
+                             rounded hover:bg-surface-2 transition-colors text-left">
+                  <span className="text-gray-300">{r.title} ({r.year})</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-amber-400">★ {r.rating}</span>
+                    <ArrowRight size={12} className="text-gray-600" />
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

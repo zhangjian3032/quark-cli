@@ -71,6 +71,36 @@ def _get_tmdb_source(args):
     return TmdbSource(api_key=api_key, language=language, region=region)
 
 
+def _get_douban_source():
+    """创建豆瓣数据源实例 (无需配置)"""
+    from quark_cli.media.discovery.douban import DoubanSource
+    return DoubanSource()
+
+
+def _get_discovery_source(args, source_name="auto"):
+    """
+    根据 source 名称创建数据源实例。
+    source_name: "auto" / "tmdb" / "douban"
+    返回 (source_instance, actual_source_name)
+    """
+    if source_name == "douban":
+        return _get_douban_source(), "douban"
+    elif source_name == "tmdb":
+        from quark_cli.media.discovery.tmdb import TmdbError
+        try:
+            return _get_tmdb_source(args), "tmdb"
+        except TmdbError:
+            raise
+    else:
+        # auto: 优先 TMDB, 无 key 回退豆瓣
+        try:
+            src = _get_tmdb_source(args)
+            return src, "tmdb"
+        except Exception:
+            info("TMDB 不可用，自动切换到豆瓣数据源")
+            return _get_douban_source(), "douban"
+
+
 def _looks_like_guid(value):
     v = (value or "").strip()
     if len(v) != 32:
@@ -567,12 +597,11 @@ def _handle_playing(args):
 
 
 # ──────────────────────────────────────────────
-# TMDB: media meta
+# media meta (影视元数据查询 — TMDB / 豆瓣)
 # ──────────────────────────────────────────────
 
 def _handle_meta(args):
-    """media meta - 查询 TMDB 影视元数据"""
-    from quark_cli.media.discovery.tmdb import TmdbError
+    """media meta - 查询影视元数据 (TMDB / 豆瓣)"""
     from quark_cli.media.discovery.naming import (
         suggest_search_keywords,
         suggest_save_path,
@@ -582,23 +611,40 @@ def _handle_meta(args):
     query = getattr(args, "query", None)
     tmdb_id = getattr(args, "tmdb", None)
     imdb_id = getattr(args, "imdb", None)
+    douban_id = getattr(args, "douban", None)
+    source_name = getattr(args, "source", "auto") or "auto"
     media_type = getattr(args, "type", "movie") or "movie"
     year = getattr(args, "year", None)
     base_path = getattr(args, "base_path", "/媒体") or "/媒体"
 
-    if not query and not tmdb_id and not imdb_id:
-        error("请指定搜索关键词、--tmdb ID 或 --imdb ID\n  用法: quark-cli media meta \"流浪地球2\"")
+    # 根据指定的 ID 自动决定 source
+    if douban_id:
+        source_name = "douban"
+    elif tmdb_id or imdb_id:
+        if source_name == "auto":
+            source_name = "tmdb"
+
+    if not query and not tmdb_id and not imdb_id and not douban_id:
+        error("请指定搜索关键词、--tmdb ID、--imdb ID 或 --douban ID\n"
+              "  用法: quark-cli media meta \"流浪地球2\"\n"
+              "        quark-cli media meta --douban 36104Mo\n"
+              "        quark-cli media meta -s douban \"流浪地球\"")
         sys.exit(1)
 
     try:
-        source = _get_tmdb_source(args)
-    except TmdbError as e:
+        source, actual_source = _get_discovery_source(args, source_name)
+    except Exception as e:
         error(str(e))
         sys.exit(1)
 
+    is_douban = actual_source == "douban"
+    source_label = "豆瓣" if is_douban else "TMDB"
+
     try:
         # 直接通过 ID 获取
-        if tmdb_id:
+        if douban_id:
+            item = source.get_detail(douban_id, media_type)
+        elif tmdb_id:
             item = source.get_detail(tmdb_id, media_type)
         elif imdb_id:
             item = source.find_by_external_id(imdb_id, "imdb_id")
@@ -615,9 +661,10 @@ def _handle_meta(args):
 
             if not result.items:
                 if is_json_mode():
-                    json_out({"error": "未找到匹配 '{}' 的影视作品 (已同时搜索 movie 和 tv)".format(query), "results": []})
+                    json_out({"error": "未找到匹配 '{}' 的影视作品 (已同时搜索 movie 和 tv)".format(query),
+                              "source": actual_source, "results": []})
                 else:
-                    warning("未找到匹配 '{}' 的影视作品 (已同时搜索 movie 和 tv)".format(query))
+                    warning("[{}] 未找到匹配 '{}' 的影视作品 (已同时搜索 movie 和 tv)".format(source_label, query))
                 return
 
             if fallback_type and not is_json_mode():
@@ -633,18 +680,19 @@ def _handle_meta(args):
             # 如果有多个搜索结果，在非 JSON 模式下提示
             if len(result.items) > 1 and not is_json_mode():
                 info("搜索到 {} 个结果，显示最佳匹配。其他结果:".format(result.total))
+                id_label = "豆瓣" if is_douban else "TMDB"
                 for i, it in enumerate(result.items[1:6], start=2):
-                    print("    {}. {} ({})  TMDB:{}  \u2605{}".format(
-                        i, it.title, it.year, it.source_id, it.rating
+                    print("    {}. {} ({})  {}:{}  \u2605{}".format(
+                        i, it.title, it.year, id_label, it.source_id, it.rating
                     ))
                 print()
 
-    except TmdbError as e:
-        error("TMDB 查询失败: {}".format(e.message))
+    except Exception as e:
+        error("{} 查询失败: {}".format(source_label, e))
         sys.exit(1)
 
-    # resolve genre_ids → names (列表页只有 id)
-    if item.genres and isinstance(item.genres[0], int):
+    # resolve genre_ids → names (TMDB 列表页只有 id)
+    if not is_douban and item.genres and isinstance(item.genres[0], int):
         try:
             item.genres = source.resolve_genre_names(item.genres, media_type)
         except Exception:
@@ -656,13 +704,22 @@ def _handle_meta(args):
     summary = format_meta_summary(item)
 
     # 补充海报 URL
+    poster_url = ""
+    backdrop_url = ""
     if item.poster_path:
-        summary["poster_url"] = source.get_poster_url(item.poster_path)
+        poster_url = source.get_poster_url(item.poster_path)
+        summary["poster_url"] = poster_url
     if item.backdrop_path:
-        summary["backdrop_url"] = source.get_poster_url(item.backdrop_path, "w1280")
+        backdrop_url = source.get_poster_url(item.backdrop_path, "w1280")
+        summary["backdrop_url"] = backdrop_url
+
+    # JSON 输出加 source 字段
+    summary["source"] = actual_source
+    summary["source_id"] = item.source_id
 
     if is_json_mode():
         json_out({
+            "source": actual_source,
             "meta": summary,
             "search_keywords": keywords,
             "save_paths": paths,
@@ -677,9 +734,14 @@ def _handle_meta(args):
         print(colorize("  \"{}\"".format(item.tagline), Color.DIM))
 
     print()
-    kvline("TMDB ID", item.source_id)
-    if item.imdb_id:
-        kvline("IMDb ID", item.imdb_id)
+    kvline("数据源", source_label)
+    if is_douban:
+        kvline("豆瓣 ID", item.source_id)
+        kvline("豆瓣链接", "https://movie.douban.com/subject/{}/".format(item.source_id))
+    else:
+        kvline("TMDB ID", item.source_id)
+        if item.imdb_id:
+            kvline("IMDb ID", item.imdb_id)
     kvline("类型", "{} / {}".format(
         "电影" if media_type == "movie" else "剧集",
         " / ".join(item.genres) if item.genres else "未知",
@@ -731,107 +793,85 @@ def _handle_meta(args):
         print(colorize("  \n  \u25b6 用法: quark-cli share save <url> \"{}\"".format(paths[0]["path"]), Color.DIM))
 
     # 海报 URL
-    if summary.get("poster_url"):
+    if poster_url:
         print()
-        kvline("海报", summary["poster_url"])
-    if summary.get("backdrop_url"):
-        kvline("背景图", summary["backdrop_url"])
+        kvline("海报", poster_url)
+    if backdrop_url:
+        kvline("背景图", backdrop_url)
 
 
 # ──────────────────────────────────────────────
-# TMDB: media discover
+# media discover (高分影视推荐 — TMDB / 豆瓣)
 # ──────────────────────────────────────────────
 
 def _handle_discover(args):
-    """media discover - 高分影视推荐"""
-    from quark_cli.media.discovery.tmdb import TmdbError
-
+    """media discover - 高分影视推荐 (TMDB / 豆瓣)"""
     list_type = getattr(args, "list_type", "top_rated") or "top_rated"
+    source_name = getattr(args, "source", "auto") or "auto"
     media_type = getattr(args, "type", "movie") or "movie"
     page = getattr(args, "page", 1) or 1
     min_rating = getattr(args, "min_rating", None)
     genre_arg = getattr(args, "genre", None)
+    tag_arg = getattr(args, "tag", None)
     year = getattr(args, "year", None)
     country = getattr(args, "country", None)
     sort_by = getattr(args, "sort_by", "vote_average.desc")
     min_votes = getattr(args, "min_votes", 50) or 50
     window = getattr(args, "window", "week") or "week"
 
+    # 指定了 --tag 则强制 douban
+    if tag_arg and source_name == "auto":
+        source_name = "douban"
+
     try:
-        source = _get_tmdb_source(args)
-    except TmdbError as e:
+        source, actual_source = _get_discovery_source(args, source_name)
+    except Exception as e:
         error(str(e))
         sys.exit(1)
 
+    is_douban = actual_source == "douban"
+    source_label = "豆瓣" if is_douban else "TMDB"
+
     try:
-        # 处理 genre 参数: 支持中文名如 "动作,科幻"
-        genre_ids = None
-        if genre_arg:
-            parts = [g.strip() for g in genre_arg.split(",")]
-            # 检查是否全是数字
-            if all(p.isdigit() for p in parts):
-                genre_ids = genre_arg
-            else:
-                genre_ids = source.resolve_genre_ids(parts, media_type)
-                if not genre_ids:
-                    warning("未匹配到有效类型: {}".format(genre_arg))
-                    # 列出可用类型
-                    genres_map = source.get_genres(media_type)
-                    info("可用类型: {}".format(
-                        ", ".join("{} ({})".format(v, k) for k, v in sorted(genres_map.items()))
-                    ))
-                    return
-
-        if list_type == "popular":
-            result = source.get_popular(media_type, page)
-            list_label = "热门"
-        elif list_type == "top_rated":
-            result = source.get_top_rated(media_type, page)
-            list_label = "高分"
-        elif list_type == "trending":
-            result = source.get_trending(media_type, window)
-            list_label = "趋势 ({})".format("本周" if window == "week" else "今日")
+        if is_douban:
+            result, list_label = _discover_douban(
+                source, list_type, media_type, page,
+                tag_arg, genre_arg, sort_by, min_rating,
+                window,
+            )
         else:
-            # discover - 高级筛选
-            filters = {
-                "sort_by": sort_by,
-                "min_votes": min_votes,
-            }
-            if min_rating is not None:
-                filters["min_rating"] = min_rating
-            if genre_ids:
-                filters["genre"] = genre_ids
-            if year:
-                filters["year"] = year
-            if country:
-                filters["country"] = country
-            result = source.discover(media_type, page, **filters)
-            list_label = "筛选"
-
-    except TmdbError as e:
-        error("TMDB 查询失败: {}".format(e.message))
+            result, list_label = _discover_tmdb(
+                source, list_type, media_type, page,
+                genre_arg, sort_by, min_rating, min_votes,
+                year, country, window,
+            )
+    except Exception as e:
+        error("{} 查询失败: {}".format(source_label, e))
         sys.exit(1)
 
     if not result.items:
         if is_json_mode():
-            json_out({"items": [], "total": 0, "page": page})
+            json_out({"items": [], "total": 0, "page": page, "source": actual_source})
         else:
-            warning("未找到符合条件的影视作品")
+            warning("[{}] 未找到符合条件的影视作品".format(source_label))
         return
 
-    # resolve genre_ids → names for display
-    for it in result.items:
-        if it.genres and isinstance(it.genres[0], int):
-            try:
-                it.genres = source.resolve_genre_names(it.genres, media_type)
-            except Exception:
-                pass
+    # resolve genre_ids → names for display (TMDB only)
+    if not is_douban:
+        for it in result.items:
+            if it.genres and isinstance(it.genres[0], int):
+                try:
+                    it.genres = source.resolve_genre_names(it.genres, media_type)
+                except Exception:
+                    pass
 
+    # ── JSON 输出 ──
     if is_json_mode():
         items = []
+        id_key = "douban_id" if is_douban else "tmdb_id"
         for it in result.items:
-            items.append({
-                "tmdb_id": it.source_id,
+            entry = {
+                id_key: it.source_id,
                 "title": it.title,
                 "original_title": it.original_title,
                 "year": it.year,
@@ -839,9 +879,13 @@ def _handle_discover(args):
                 "vote_count": it.vote_count,
                 "genres": it.genres,
                 "overview": it.overview[:200] if it.overview else "",
-                "poster_url": source.get_poster_url(it.poster_path) if it.poster_path else "",
-            })
+            }
+            poster = source.get_poster_url(it.poster_path) if it.poster_path else ""
+            if poster:
+                entry["poster_url"] = poster
+            items.append(entry)
         json_out({
+            "source": actual_source,
             "list_type": list_type,
             "media_type": media_type,
             "page": result.page,
@@ -853,7 +897,7 @@ def _handle_discover(args):
 
     # ── 终端输出 ──
     type_label = "电影" if media_type == "movie" else "剧集"
-    header("\u2b50 {} {} 推荐".format(type_label, list_label))
+    header("\u2b50 [{}] {} {} 推荐".format(source_label, type_label, list_label))
 
     # 附加筛选条件提示
     filters_desc = []
@@ -861,6 +905,8 @@ def _handle_discover(args):
         filters_desc.append("\u2265 {} 分".format(min_rating))
     if genre_arg:
         filters_desc.append("类型: {}".format(genre_arg))
+    if tag_arg:
+        filters_desc.append("标签: {}".format(tag_arg))
     if year:
         filters_desc.append("年份: {}".format(year))
     if country:
@@ -869,7 +915,8 @@ def _handle_discover(args):
         info("筛选条件: {}".format(" | ".join(filters_desc)))
         print()
 
-    cols = ["#", "名称", "年份", "评分", "票数", "类型", "TMDB"]
+    id_col = "豆瓣" if is_douban else "TMDB"
+    cols = ["#", "名称", "年份", "评分", "票数", "类型", id_col]
     widths = [4, 28, 6, 6, 7, 16, 9]
     table_header(cols, widths)
 
@@ -892,11 +939,110 @@ def _handle_discover(args):
 
     print()
     print("  共 {} 部 | 第 {}/{} 页".format(result.total, result.page, result.total_pages))
-    print(colorize("  \u25b6 查看详情: quark-cli media meta --tmdb <TMDB_ID>".format(), Color.DIM))
+
+    # 提示下一步操作
+    if is_douban:
+        print(colorize("  \u25b6 查看详情: quark-cli media meta --douban <豆瓣ID>", Color.DIM))
+    else:
+        print(colorize("  \u25b6 查看详情: quark-cli media meta --tmdb <TMDB_ID>", Color.DIM))
     if result.page < result.total_pages:
-        print(colorize("  \u25b6 下一页: quark-cli media discover --list {} -t {} -p {}".format(
-            list_type, media_type, page + 1
-        ), Color.DIM))
+        next_cmd = "quark-cli media discover -s {} --list {} -t {} -p {}".format(
+            actual_source, list_type, media_type, page + 1
+        )
+        if tag_arg:
+            next_cmd += " --tag \"{}\"".format(tag_arg)
+        print(colorize("  \u25b6 下一页: {}".format(next_cmd), Color.DIM))
+
+    # 豆瓣模式: 提示可用标签
+    if is_douban and hasattr(source, "get_available_tags"):
+        tags = source.get_available_tags(media_type)
+        if tags:
+            print()
+            print(colorize("  可用标签: {}".format(" / ".join(tags[:15])), Color.DIM))
+
+
+def _discover_tmdb(source, list_type, media_type, page,
+                   genre_arg, sort_by, min_rating, min_votes,
+                   year, country, window):
+    """TMDB 发现逻辑 (从原 _handle_discover 提取)"""
+    # 处理 genre 参数: 支持中文名如 "动作,科幻"
+    genre_ids = None
+    if genre_arg:
+        parts = [g.strip() for g in genre_arg.split(",")]
+        if all(p.isdigit() for p in parts):
+            genre_ids = genre_arg
+        else:
+            genre_ids = source.resolve_genre_ids(parts, media_type)
+            if not genre_ids:
+                warning("未匹配到有效类型: {}".format(genre_arg))
+                genres_map = source.get_genres(media_type)
+                info("可用类型: {}".format(
+                    ", ".join("{} ({})".format(v, k) for k, v in sorted(genres_map.items()))
+                ))
+                from quark_cli.media.discovery.base import DiscoveryResult
+                return DiscoveryResult(), "筛选"
+
+    if list_type == "popular":
+        result = source.get_popular(media_type, page)
+        return result, "热门"
+    elif list_type == "top_rated":
+        result = source.get_top_rated(media_type, page)
+        return result, "高分"
+    elif list_type == "trending":
+        result = source.get_trending(media_type, window)
+        return result, "趋势 ({})".format("本周" if window == "week" else "今日")
+    else:
+        filters = {"sort_by": sort_by, "min_votes": min_votes}
+        if min_rating is not None:
+            filters["min_rating"] = min_rating
+        if genre_ids:
+            filters["genre"] = genre_ids
+        if year:
+            filters["year"] = year
+        if country:
+            filters["country"] = country
+        result = source.discover(media_type, page, **filters)
+        return result, "筛选"
+
+
+def _discover_douban(source, list_type, media_type, page,
+                     tag_arg, genre_arg, sort_by, min_rating,
+                     window):
+    """豆瓣发现逻辑"""
+    if list_type == "popular":
+        result = source.get_popular(media_type, page)
+        return result, "热门"
+    elif list_type == "top_rated":
+        result = source.get_top_rated(media_type, page)
+        return result, "高分"
+    elif list_type == "trending":
+        result = source.get_trending(media_type, window)
+        return result, "趋势"
+    else:
+        # discover — 使用豆瓣标签浏览
+        # sort_by: 豆瓣支持 recommend / time / rank
+        douban_sort = sort_by
+        if sort_by.startswith("vote_average"):
+            douban_sort = "rank"
+        elif sort_by in ("recommend", "time", "rank"):
+            douban_sort = sort_by
+
+        filters = {"sort": douban_sort}
+
+        # --tag 优先; 否则 --genre 映射为 tag
+        if tag_arg:
+            filters["tag"] = tag_arg
+        elif genre_arg:
+            filters["tag"] = genre_arg
+
+        if min_rating is not None:
+            filters["min_rating"] = min_rating
+
+        result = source.discover(media_type, page, **filters)
+        label = "筛选"
+        if tag_arg:
+            label = "标签: {}".format(tag_arg)
+        return result, label
 
 
 # ──────────────────────────────────────────────
@@ -1187,7 +1333,7 @@ def handle(args):
     else:
         error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|auto-save}")
         print()
-        print("  影视媒体中心管理 (支持 fnOS / Emby / Jellyfin / TMDB)")
+        print("  影视媒体中心管理 (支持 fnOS / Emby / Jellyfin / TMDB / 豆瓣)")
         print()
         print("  子命令:")
         print("    login     登录媒体中心")
@@ -1199,6 +1345,6 @@ def handle(args):
         print("    poster    下载海报")
         print("    export    导出影片列表")
         print("    playing   查看继续观看列表")
-        print("    meta      查询影视元数据 (TMDB)")
-        print("    discover  高分影视推荐 (TMDB)")
+        print("    meta      查询影视元数据 (TMDB/豆瓣)")
+        print("    discover  高分影视推荐 (TMDB/豆瓣)")
         print("    auto-save 自动搜索+转存 (一键全流程)")

@@ -11,6 +11,7 @@ export default function MetaPage() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [mediaType, setMediaType] = useState('movie')
+  const [source, setSource] = useState('')
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -20,7 +21,7 @@ export default function MetaPage() {
     if (!query.trim()) return
     setLoading(true)
     setError(null)
-    discoveryApi.meta(query.trim(), mediaType)
+    discoveryApi.meta(query.trim(), mediaType, null, source || null)
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }
@@ -43,7 +44,7 @@ export default function MetaPage() {
 
   return (
     <>
-      <PageHeader title="元数据查询" description="TMDB 影视信息 + 搜索关键词 + 保存路径建议" />
+      <PageHeader title="元数据查询" description="TMDB/豆瓣 影视信息 + 搜索关键词 + 保存路径建议" />
 
       <form onSubmit={doSearch} className="flex gap-3 mb-8">
         <div className="relative flex-1">
@@ -64,6 +65,15 @@ export default function MetaPage() {
         >
           <option value="movie">电影</option>
           <option value="tv">剧集</option>
+        </select>
+        <select
+          value={source}
+          onChange={e => setSource(e.target.value)}
+          className="input w-20 text-sm"
+        >
+          <option value="">自动</option>
+          <option value="tmdb">TMDB</option>
+          <option value="douban">豆瓣</option>
         </select>
         <button type="submit" className="btn-primary" disabled={loading}>查询</button>
       </form>
@@ -119,13 +129,27 @@ export default function MetaPage() {
                   ))}
                 </div>
 
-                <div className="flex gap-4 mt-3 text-xs text-gray-500">
-                  <span>TMDB: {meta.tmdb_id}</span>
-                  {meta.imdb_id && (
-                    <a href={`https://www.imdb.com/title/${meta.imdb_id}/`} target="_blank" rel="noreferrer"
-                      className="hover:text-gray-300 flex items-center gap-1">
-                      IMDb: {meta.imdb_id} <ExternalLink size={10} />
-                    </a>
+                <div className="flex gap-4 mt-3 text-xs text-gray-500 flex-wrap">
+                  {data.source === 'douban' ? (
+                    <>
+                      <span className="text-green-500">豆瓣: {meta.source_id || meta.douban_id}</span>
+                      {meta.extra?.douban_url && (
+                        <a href={meta.extra.douban_url} target="_blank" rel="noreferrer"
+                          className="hover:text-gray-300 flex items-center gap-1">
+                          豆瓣页面 <ExternalLink size={10} />
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span>TMDB: {meta.tmdb_id || meta.source_id}</span>
+                      {meta.imdb_id && (
+                        <a href={`https://www.imdb.com/title/${meta.imdb_id}/`} target="_blank" rel="noreferrer"
+                          className="hover:text-gray-300 flex items-center gap-1">
+                          IMDb: {meta.imdb_id} <ExternalLink size={10} />
+                        </a>
+                      )}
+                    </>
                   )}
                   {meta.status && <span>状态: {meta.status}</span>}
                 </div>
@@ -220,7 +244,12 @@ export default function MetaPage() {
               <div className="space-y-1">
                 {data.other_results.map((r, i) => (
                   <button key={i}
-                    onClick={() => navigate(`/discover/${r.tmdb_id}?type=${data.media_type}`)}
+                    onClick={() => {
+                      const rid = r.source_id || r.tmdb_id || r.douban_id
+                      let url = `/discover/${rid}?type=${data.media_type}`
+                      if (data.source) url += `&source=${data.source}`
+                      navigate(url)
+                    }}
                     className="w-full flex items-center justify-between text-sm py-2 px-2
                                rounded hover:bg-surface-2 transition-colors text-left">
                     <span className="text-gray-300">{r.title} ({r.year})</span>
@@ -238,7 +267,7 @@ export default function MetaPage() {
         <EmptyState
           icon={Search}
           title="查询影视元数据"
-          description="输入影视名称，获取 TMDB 详情、搜索关键词建议和保存路径建议"
+          description="输入影视名称，获取详情、搜索关键词建议和保存路径建议"
         />
       )}
     </>

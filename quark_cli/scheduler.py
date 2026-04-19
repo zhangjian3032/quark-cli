@@ -2,7 +2,7 @@
 定时任务调度器 — 自动发现 + 搜索 + 转存
 
 功能:
-  - 从 TMDB 发现页随机挑选影视
+  - 从 TMDB/豆瓣 发现页随机挑选影视
   - 通过媒体库查重，已有则跳过
   - 自动搜索网盘资源 → 转存
   - 飞书机器人通知转存结果
@@ -14,13 +14,15 @@
     "enabled": true,
     "cron": "0 3 * * *",           # cron 表达式 (或 interval_minutes)
     "interval_minutes": 360,        # 简单间隔 (分钟)，与 cron 二选一
+    "source": "tmdb",               # 数据源: tmdb / douban (默认 tmdb)
     "media_type": "movie",          # movie / tv
     "count": 3,                     # 每次挑选数量
     "filters": {
       "min_rating": 7.0,
       "genre": "科幻",
       "year": 2024,
-      "country": "US"
+      "country": "US",
+      "tag": "热门"                  # 豆瓣专用: 标签
     },
     "save_base_path": "/媒体",
     "check_media_lib": true,        # 是否媒体库查重
@@ -45,6 +47,7 @@ DEFAULT_TASK = {
     "name": "自动发现",
     "enabled": True,
     "interval_minutes": 360,
+    "source": "tmdb",
     "media_type": "movie",
     "count": 3,
     "filters": {},
@@ -89,6 +92,42 @@ def _parse_interval(task):
     return 360 * 60
 
 
+# ── 创建数据源 ──
+
+def _create_discovery_source(task, cfg):
+    """
+    根据任务配置创建数据源实例。
+
+    Args:
+        task: 合并了默认值的任务配置 dict
+        cfg: ConfigManager 实例
+
+    Returns:
+        (source, source_name) 或 (None, error_msg)
+    """
+    source_name = task.get("source", "tmdb")
+    disc_cfg = cfg.data.get("media", {}).get("discovery", {})
+
+    if source_name == "douban":
+        from quark_cli.media.discovery.douban import DoubanSource
+        return DoubanSource(), "douban"
+
+    # 默认 tmdb
+    from quark_cli.media.discovery.tmdb import TmdbSource
+    tmdb_key = disc_cfg.get("tmdb_api_key", "")
+    if not tmdb_key:
+        # 回退到豆瓣
+        logger.warning("TMDB API Key 未配置, 回退到豆瓣数据源")
+        from quark_cli.media.discovery.douban import DoubanSource
+        return DoubanSource(), "douban"
+
+    return TmdbSource(
+        api_key=tmdb_key,
+        language=disc_cfg.get("language", "zh-CN"),
+        region=disc_cfg.get("region", "CN"),
+    ), "tmdb"
+
+
 # ── 单次任务执行 ──
 
 def run_discover_task(task_config, config_path=None):
@@ -96,7 +135,7 @@ def run_discover_task(task_config, config_path=None):
     执行一次「自动发现」任务。
 
     流程:
-      1. TMDB discover 随机页获取候选列表
+      1. 从数据源 (TMDB/豆瓣) discover 随机页获取候选列表
       2. 按 count 挑选
       3. 媒体库查重 (可选)
       4. 逐个自动搜索+转存
@@ -105,6 +144,7 @@ def run_discover_task(task_config, config_path=None):
     Returns:
         dict: {
             "task_name": str,
+            "source": str,
             "discovered": int,
             "skipped_existing": int,
             "attempted": int,
@@ -121,6 +161,7 @@ def run_discover_task(task_config, config_path=None):
 
     result = {
         "task_name": task["name"],
+        "source": task.get("source", "tmdb"),
         "discovered": 0,
         "skipped_existing": 0,
         "attempted": 0,
@@ -129,21 +170,11 @@ def run_discover_task(task_config, config_path=None):
         "timestamp": datetime.now().isoformat(),
     }
 
-    # ── Step 1: TMDB 发现 ──
+    # ── Step 1: 创建数据源并发现 ──
     try:
-        from quark_cli.media.discovery.tmdb import TmdbSource
+        source, actual_source = _create_discovery_source(task, cfg)
+        result["source"] = actual_source
 
-        disc_cfg = cfg.data.get("media", {}).get("discovery", {})
-        tmdb_key = disc_cfg.get("tmdb_api_key", "")
-        if not tmdb_key:
-            result["error"] = "TMDB API Key 未配置"
-            return result
-
-        tmdb = TmdbSource(
-            api_key=tmdb_key,
-            language=disc_cfg.get("language", "zh-CN"),
-            region=disc_cfg.get("region", "CN"),
-        )
         media_type = task.get("media_type", "movie")
         filters = task.get("filters", {})
         count = task.get("count", 3)
@@ -151,39 +182,61 @@ def run_discover_task(task_config, config_path=None):
         # 随机页数 (1~20)
         random_page = random.randint(1, 20)
 
-        # 构建 discover 参数
-        discover_kwargs = {
-            "sort_by": "popularity.desc",
-            "min_votes": 50,
-        }
-        if filters.get("min_rating"):
-            discover_kwargs["min_rating"] = float(filters["min_rating"])
-        if filters.get("genre"):
-            genre_val = filters["genre"]
-            # 尝试解析中文类型名
-            if not str(genre_val).isdigit():
-                try:
-                    genre_ids = tmdb.resolve_genre_ids(
-                        [g.strip() for g in str(genre_val).split(",")],
-                        media_type,
-                    )
-                    if genre_ids:
-                        discover_kwargs["genre"] = genre_ids
-                except Exception:
-                    pass
-            else:
-                discover_kwargs["genre"] = str(genre_val)
-        if filters.get("year"):
-            discover_kwargs["year"] = int(filters["year"])
-        if filters.get("country"):
-            discover_kwargs["country"] = filters["country"]
+        if actual_source == "douban":
+            # ── 豆瓣发现 ──
+            discover_kwargs = {}
+            if filters.get("min_rating"):
+                discover_kwargs["min_rating"] = float(filters["min_rating"])
+            if filters.get("tag"):
+                discover_kwargs["tag"] = filters["tag"]
+            elif filters.get("genre"):
+                # genre 直接用作 tag (豆瓣支持中文类型名)
+                discover_kwargs["tag"] = str(filters["genre"])
+            elif filters.get("country"):
+                country_tag = {
+                    "CN": "华语", "US": "欧美", "JP": "日本", "KR": "韩国",
+                }.get(str(filters["country"]).upper(), str(filters["country"]))
+                discover_kwargs["tag"] = country_tag
 
-        discover_result = tmdb.discover(media_type, random_page, **discover_kwargs)
+            if filters.get("sort"):
+                discover_kwargs["sort"] = filters["sort"]
+
+            discover_result = source.discover(media_type, random_page, **discover_kwargs)
+
+        else:
+            # ── TMDB 发现 ──
+            discover_kwargs = {
+                "sort_by": "popularity.desc",
+                "min_votes": 50,
+            }
+            if filters.get("min_rating"):
+                discover_kwargs["min_rating"] = float(filters["min_rating"])
+            if filters.get("genre"):
+                genre_val = filters["genre"]
+                if not str(genre_val).isdigit():
+                    try:
+                        genre_ids = source.resolve_genre_ids(
+                            [g.strip() for g in str(genre_val).split(",")],
+                            media_type,
+                        )
+                        if genre_ids:
+                            discover_kwargs["genre"] = genre_ids
+                    except Exception:
+                        pass
+                else:
+                    discover_kwargs["genre"] = str(genre_val)
+            if filters.get("year"):
+                discover_kwargs["year"] = int(filters["year"])
+            if filters.get("country"):
+                discover_kwargs["country"] = filters["country"]
+
+            discover_result = source.discover(media_type, random_page, **discover_kwargs)
+
         candidates = discover_result.items
         result["discovered"] = len(candidates)
 
         if not candidates:
-            result["error"] = "TMDB 未返回结果 (page={})".format(random_page)
+            result["error"] = "数据源未返回结果 (source={}, page={})".format(actual_source, random_page)
             return result
 
         # 随机打乱后取 count 个
@@ -191,8 +244,8 @@ def run_discover_task(task_config, config_path=None):
         selected = candidates[:count]
 
     except Exception as e:
-        result["error"] = "TMDB 发现失败: {}".format(str(e))
-        logger.exception("TMDB discover error")
+        result["error"] = "发现失败 ({}): {}".format(task.get("source", "tmdb"), str(e))
+        logger.exception("Discover error")
         return result
 
     # ── Step 2: 媒体库查重 ──
@@ -239,17 +292,15 @@ def run_discover_task(task_config, config_path=None):
         title = item.title
         year = item.year
 
-        # 媒体库查重 (仅用纯标题搜索，不带年份括号)
+        # 媒体库查重
         if media_provider:
             try:
-                # 搜索关键词只用标题，不加年份/括号
                 search_keyword = title.strip()
                 search_result = media_provider.search_items(keyword=search_keyword, page=1, page_size=10)
                 found_existing = False
                 if search_result.items:
                     for existing in search_result.items:
                         ex_title = (existing.title or "").strip()
-                        # 标题模糊匹配 + 年份容差
                         if ex_title and (
                             title.lower() in ex_title.lower()
                             or ex_title.lower() in title.lower()
@@ -270,10 +321,11 @@ def run_discover_task(task_config, config_path=None):
 
         # 获取详情 + 搜索关键词
         try:
-            detail_item = tmdb.get_detail(item.source_id, media_type)
+            detail_item = source.get_detail(item.source_id, media_type)
             if detail_item.genres and isinstance(detail_item.genres[0], int):
                 try:
-                    detail_item.genres = tmdb.resolve_genre_names(detail_item.genres, media_type)
+                    if hasattr(source, "resolve_genre_names"):
+                        detail_item.genres = source.resolve_genre_names(detail_item.genres, media_type)
                 except Exception:
                     pass
 
@@ -306,7 +358,8 @@ def run_discover_task(task_config, config_path=None):
                 result["saved"].append({
                     "title": title,
                     "year": year,
-                    "tmdb_id": item.source_id,
+                    "source_id": item.source_id,
+                    "source": actual_source,
                     "save_path": save_path,
                     "saved_count": save_result.get("saved_count", 0),
                     "saved_from": save_result.get("saved_from", ""),
@@ -316,7 +369,7 @@ def run_discover_task(task_config, config_path=None):
                 result["failed"].append({
                     "title": title,
                     "year": year,
-                    "tmdb_id": item.source_id,
+                    "source_id": item.source_id,
                     "error": save_result.get("error", "未知错误"),
                 })
                 logger.info("转存失败: %s (%s) - %s", title, year, save_result.get("error"))
@@ -339,18 +392,20 @@ def format_notify_text(result):
     lines = []
 
     task_name = result.get("task_name", "自动发现")
+    source = result.get("source", "")
     saved = result.get("saved", [])
     failed = result.get("failed", [])
     skipped = result.get("skipped_existing", 0)
 
     # 标题行
+    source_label = " [{}]".format(source.upper()) if source else ""
     if saved:
-        lines.append([{"tag": "text", "text": "✅ {} 完成".format(task_name)}])
+        lines.append([{"tag": "text", "text": "✅ {}{} 完成".format(task_name, source_label)}])
     elif result.get("error"):
-        lines.append([{"tag": "text", "text": "❌ {} 失败: {}".format(task_name, result["error"])}])
+        lines.append([{"tag": "text", "text": "❌ {}{} 失败: {}".format(task_name, source_label, result["error"])}])
         return {"zh_cn": {"title": "📺 {}".format(task_name), "content": lines}}
     else:
-        lines.append([{"tag": "text", "text": "⚠️ {} 完成 (无新增)".format(task_name)}])
+        lines.append([{"tag": "text", "text": "⚠️ {}{} 完成 (无新增)".format(task_name, source_label)}])
 
     # 统计
     stats_parts = []
@@ -374,6 +429,14 @@ def format_notify_text(result):
                 s.get("save_path", ""), s.get("saved_count", 0)
             )},
         ])
+        # 显示具体文件名 (最多 8 个, 避免通知过长)
+        filenames = s.get("filenames", [])
+        if filenames:
+            shown = filenames[:8]
+            for fn in shown:
+                lines.append([{"tag": "text", "text": "        📄 {}".format(fn)}])
+            if len(filenames) > 8:
+                lines.append([{"tag": "text", "text": "        ... 共 {} 个文件".format(len(filenames))}])
 
     # 失败列表
     for f in failed:
@@ -403,9 +466,6 @@ def _get_tenant_token(app_id, app_secret, api_base="https://open.feishu.cn"):
 def send_bot_notify(config_path, result, notify_open_id=""):
     """
     通过飞书 API 发送通知 (私聊方式, 不依赖 bot 进程)
-
-    发送方式: 用 tenant_access_token + open_id 向指定用户私聊
-    消息格式: 富文本 post
     """
     import os
     import json
@@ -415,7 +475,6 @@ def send_bot_notify(config_path, result, notify_open_id=""):
     cfg = ConfigManager(config_path)
     cfg.load()
 
-    # 读取 bot 配置 — 兼容 bot.feishu.xxx 和 bot.xxx
     bot_data = cfg.data.get("bot", {})
     bot_cfg = bot_data.get("feishu", bot_data)
 
@@ -426,7 +485,6 @@ def send_bot_notify(config_path, result, notify_open_id=""):
         logger.info("飞书 Bot 未配置 app_id/app_secret，跳过通知")
         return False
 
-    # 确定通知人 — 优先任务级 → 全局配置级
     open_id = (
         notify_open_id
         or bot_cfg.get("notify_open_id", "")
@@ -436,17 +494,14 @@ def send_bot_notify(config_path, result, notify_open_id=""):
         logger.info("未配置通知人 open_id (bot.feishu.notify_open_id)，跳过通知")
         return False
 
-    # API 域名: 支持内网 (bytedance) 和外网 (feishu)
     api_base = bot_cfg.get("api_base", "") or os.environ.get("FEISHU_API_BASE", "")
     if not api_base:
         api_base = "https://open.feishu.cn"
 
-    # Step 1: 获取 tenant_access_token
     token = _get_tenant_token(app_id, app_secret, api_base)
     if not token:
         return False
 
-    # Step 2: 发送消息
     try:
         content = format_notify_text(result)
         msg_content = json.dumps(content, ensure_ascii=False)
@@ -487,12 +542,11 @@ class AutoDiscoverScheduler:
         self.config_path = config_path
         self._running = False
         self._thread = None
-        self._task_threads = {}  # task_name → thread
-        self._last_run = {}  # task_name → datetime
-        self._results = {}  # task_name → last result
+        self._task_threads = {}
+        self._last_run = {}
+        self._results = {}
 
     def start(self):
-        """启动调度器 (非阻塞)"""
         if self._running:
             return
         self._running = True
@@ -501,12 +555,10 @@ class AutoDiscoverScheduler:
         logger.info("定时任务调度器已启动")
 
     def stop(self):
-        """停止调度器"""
         self._running = False
         logger.info("定时任务调度器已停止")
 
     def _load_tasks(self):
-        """从配置读取任务列表"""
         from quark_cli.config import ConfigManager
         cfg = ConfigManager(self.config_path)
         cfg.load()
@@ -514,8 +566,6 @@ class AutoDiscoverScheduler:
         return [_merge_defaults(t) for t in tasks if t.get("enabled", True)]
 
     def _loop(self):
-        """主调度循环"""
-        # 启动后等待 30 秒再开始第一轮，避免与 serve 启动冲突
         time.sleep(30)
 
         while self._running:
@@ -531,11 +581,10 @@ class AutoDiscoverScheduler:
                     if last and (now - last).total_seconds() < interval:
                         continue
 
-                    # 避免重复执行
                     if name in self._task_threads and self._task_threads[name].is_alive():
                         continue
 
-                    logger.info("开始执行定时任务: %s", name)
+                    logger.info("开始执行定时任务: %s (source=%s)", name, task.get("source", "tmdb"))
                     self._last_run[name] = now
                     t = threading.Thread(
                         target=self._execute_task, args=(task,), daemon=True
@@ -546,19 +595,15 @@ class AutoDiscoverScheduler:
             except Exception:
                 logger.exception("调度循环异常")
 
-            # 每 60 秒检查一次
             time.sleep(60)
 
     def _execute_task(self, task):
-        """执行单个任务"""
         name = task["name"]
         try:
             result = run_discover_task(task, self.config_path)
             self._results[name] = result
 
-            # 飞书通知
             if task.get("bot_notify", True):
-                # 只在有结果时通知 (有转存或有失败)
                 if result.get("saved") or result.get("failed") or result.get("error"):
                     send_bot_notify(
                         self.config_path, result,
@@ -568,7 +613,6 @@ class AutoDiscoverScheduler:
             logger.info("定时任务完成: %s (saved=%d, failed=%d)",
                         name, len(result.get("saved", [])), len(result.get("failed", [])))
 
-            # 写入历史记录
             try:
                 from quark_cli.history import record as history_record
                 saved_count = len(result.get("saved", []))
@@ -587,7 +631,6 @@ class AutoDiscoverScheduler:
             except Exception:
                 logger.debug("写入任务历史失败", exc_info=True)
 
-            # 同步到本地 NAS (可选)
             if result.get("saved") and task.get("sync", {}).get("enabled", False):
                 self._run_sync_after_save(task, result)
 
@@ -611,7 +654,6 @@ class AutoDiscoverScheduler:
                 pass
 
     def _run_sync_after_save(self, task, save_result):
-        """转存成功后自动同步到本地 NAS"""
         name = task["name"]
         try:
             from quark_cli.config import ConfigManager
@@ -634,7 +676,6 @@ class AutoDiscoverScheduler:
                     sync_progress.skipped_files,
                     sync_progress.deleted_files,
                 )
-                # 追加同步信息到结果
                 save_result["sync"] = {
                     "status": "done",
                     "copied": sync_progress.copied_files,
@@ -653,7 +694,6 @@ class AutoDiscoverScheduler:
             save_result["sync"] = {"status": "error", "error": str(e)}
 
     def get_status(self):
-        """获取调度器状态"""
         tasks = []
         try:
             all_tasks = self._load_tasks()
@@ -665,6 +705,7 @@ class AutoDiscoverScheduler:
             tasks.append({
                 "name": name,
                 "enabled": task.get("enabled", True),
+                "source": task.get("source", "tmdb"),
                 "interval_minutes": task.get("interval_minutes", 360),
                 "cron": task.get("cron", ""),
                 "media_type": task.get("media_type", "movie"),
@@ -681,7 +722,6 @@ class AutoDiscoverScheduler:
         }
 
     def trigger_task(self, task_name):
-        """手动触发指定任务"""
         tasks = self._load_tasks()
         for task in tasks:
             if task["name"] == task_name:
@@ -703,7 +743,6 @@ _scheduler_instance = None
 
 
 def get_scheduler(config_path=None):
-    """获取/创建调度器单例"""
     global _scheduler_instance
     if _scheduler_instance is None:
         _scheduler_instance = AutoDiscoverScheduler(config_path)
@@ -711,7 +750,6 @@ def get_scheduler(config_path=None):
 
 
 def try_start_scheduler(config_path=None):
-    """尝试启动调度器，无任务则跳过"""
     from quark_cli.config import ConfigManager
     cfg = ConfigManager(config_path)
     cfg.load()
