@@ -268,6 +268,110 @@ function RuleModal({ feedId, onClose, onSave }) {
 
 // ── Test Feed 弹窗 ──
 
+function TestItemCard({ item, index }) {
+  const [expanded, setExpanded] = useState(false)
+
+  // 从 description 中简单提取链接标签
+  const linkBadges = []
+  const desc = item.description || ''
+  if (/pan\.quark\.cn/i.test(desc) || /pan\.quark\.cn/i.test(item.link || '')) linkBadges.push({ type: 'quark', color: 'text-blue-400 bg-blue-500/20' })
+  if (/alipan\.com|aliyundrive/i.test(desc) || /alipan\.com|aliyundrive/i.test(item.link || '')) linkBadges.push({ type: 'alipan', color: 'text-green-400 bg-green-500/20' })
+  if (/magnet:\?/i.test(desc)) linkBadges.push({ type: 'magnet', color: 'text-purple-400 bg-purple-500/20' })
+  if (item.enclosures && item.enclosures.length > 0) linkBadges.push({ type: 'enclosure', color: 'text-orange-400 bg-orange-500/20' })
+
+  // 清理 HTML 标签用于纯文本显示
+  const plainDesc = desc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+
+  return (
+    <div className="bg-surface-2 border border-surface-3 rounded-lg overflow-hidden">
+      <div
+        className="p-3 cursor-pointer hover:bg-surface-3/50 transition select-none"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="flex items-start gap-2">
+          <span className="text-xs text-gray-600 font-mono mt-0.5 flex-shrink-0 w-5 text-right">{index + 1}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5">
+              <div className="text-sm font-medium flex-1 min-w-0" style={{ wordBreak: 'break-word' }}>
+                {item.title || '(无标题)'}
+              </div>
+              {expanded ? <ChevronUp size={14} className="text-gray-500 flex-shrink-0" /> : <ChevronDown size={14} className="text-gray-500 flex-shrink-0" />}
+            </div>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {item.pub_date && <span className="text-xs text-gray-500">{new Date(item.pub_date).toLocaleString()}</span>}
+              {item.author && <span className="text-xs text-gray-500">· {item.author}</span>}
+              {linkBadges.map((b, j) => (
+                <span key={j} className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${b.color}`}>{b.type}</span>
+              ))}
+              {(item.categories || []).length > 0 && (
+                <span className="text-xs text-gray-600">{item.categories.slice(0, 3).join(' / ')}</span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-surface-3 p-3 space-y-2 text-xs bg-surface-1/50">
+          {/* 描述 */}
+          {plainDesc && (
+            <div>
+              <div className="text-gray-500 mb-1 font-semibold">描述</div>
+              <div className="text-gray-300 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">{plainDesc.slice(0, 800)}{plainDesc.length > 800 ? '...' : ''}</div>
+            </div>
+          )}
+
+          {/* 链接 */}
+          {item.link && (
+            <div>
+              <div className="text-gray-500 mb-1 font-semibold">链接</div>
+              <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline break-all">{item.link}</a>
+            </div>
+          )}
+
+          {/* 分类 */}
+          {(item.categories || []).length > 0 && (
+            <div>
+              <div className="text-gray-500 mb-1 font-semibold">分类</div>
+              <div className="flex flex-wrap gap-1">
+                {item.categories.map((cat, j) => (
+                  <span key={j} className="px-1.5 py-0.5 rounded bg-surface-3 text-gray-400">{cat}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Enclosures */}
+          {(item.enclosures || []).length > 0 && (
+            <div>
+              <div className="text-gray-500 mb-1 font-semibold">附件 ({item.enclosures.length})</div>
+              <div className="space-y-1">
+                {item.enclosures.map((enc, j) => (
+                  <div key={j} className="flex items-center gap-2">
+                    <Link size={10} className="text-gray-500 flex-shrink-0" />
+                    <a href={enc.url || enc} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline break-all truncate">
+                      {enc.url || enc}
+                    </a>
+                    {enc.type && <span className="text-gray-600 flex-shrink-0">{enc.type}</span>}
+                    {enc.length && <span className="text-gray-600 flex-shrink-0">{(Number(enc.length) / 1048576).toFixed(1)} MB</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* GUID */}
+          {item.guid && (
+            <div className="text-gray-600 pt-1 border-t border-surface-3">
+              GUID: <span className="font-mono text-gray-500">{item.guid}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function TestModal({ feed, onClose }) {
   const [url, setUrl] = useState(feed?.feed_url || '')
   const [loading, setLoading] = useState(false)
@@ -301,6 +405,9 @@ function TestModal({ feed, onClose }) {
   useEffect(() => {
     if (feed?.id) doTest()
   }, []) // eslint-disable-line
+
+  const totalItems = result?.item_count ?? 0
+  const shownItems = result?.items?.length ?? 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -348,33 +455,29 @@ function TestModal({ feed, onClose }) {
 
           {result && (
             <div className="space-y-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-gray-400">Feed: <span className="text-white">{result.feed_title || '未知'}</span></span>
-                <span className="text-gray-500">{result.items?.length || 0} 条目</span>
+              {/* Feed 信息 + 条目统计 */}
+              <div className="bg-surface-2 border border-surface-3 rounded-lg p-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-gray-400">Feed: <span className="text-white font-medium">{result.feed_title || '未知'}</span></span>
+                </div>
+                {result.feed_description && (
+                  <div className="text-xs text-gray-500 mt-1 line-clamp-2">{result.feed_description}</div>
+                )}
+                <div className="flex items-center gap-3 mt-2 text-xs">
+                  <span className="px-2 py-0.5 rounded-full bg-brand-600/20 text-brand-400 font-semibold">
+                    共 {totalItems} 条
+                  </span>
+                  {totalItems > shownItems && (
+                    <span className="text-gray-500">预览前 {shownItems} 条</span>
+                  )}
+                </div>
               </div>
 
+              {/* 条目列表 */}
               <div className="space-y-2">
+                <div className="text-xs text-gray-500">点击条目展开详情</div>
                 {(result.items || []).map((item, i) => (
-                  <div key={i} className="bg-surface-2 border border-surface-3 rounded-lg p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">{item.title}</div>
-                        <div className="text-xs text-gray-500 mt-1">
-                          {item.pub_date && <span>{new Date(item.pub_date).toLocaleString()}</span>}
-                          {item.author && <span className="ml-2">· {item.author}</span>}
-                        </div>
-                        {item.links && item.links.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {item.links.map((link, j) => (
-                              <span key={j} className="px-1.5 py-0.5 rounded text-[10px] bg-brand-600/20 text-brand-300">
-                                {link.type || 'link'}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  <TestItemCard key={i} item={item} index={i} />
                 ))}
               </div>
             </div>
