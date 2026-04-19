@@ -22,6 +22,11 @@ def get_config():
     return ConfigManager(config_path=_config_path)
 
 
+def get_config_path():
+    """返回当前配置文件路径 (供 RssManager / history 等使用)"""
+    return _config_path
+
+
 def _get_cache_config():
     """读取缓存配置"""
     cfg = get_config()
