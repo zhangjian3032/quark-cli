@@ -179,6 +179,30 @@ export const discoveryApi = {
   },
 }
 
+// ── Torrent (qBittorrent) ──
+export const torrentApi = {
+  config:      ()               => request('/torrent/config'),
+  updateConfig:(data)           => put('/torrent/config', data),
+  test:        (clientId=null)  => post('/torrent/test', clientId ? { client_id: clientId } : {}),
+  version:     (clientId=null)  => {
+    let url = '/torrent/version'
+    if (clientId) url += `?client_id=${encodeURIComponent(clientId)}`
+    return request(url)
+  },
+  list:        (params = {})    => {
+    const qs = new URLSearchParams({
+      filter: params.filter || 'all',
+      sort: params.sort || 'added_on',
+      reverse: String(params.reverse ?? true),
+      limit: String(params.limit || 50),
+      ...(params.category ? { category: params.category } : {}),
+      ...(params.clientId ? { client_id: params.clientId } : {}),
+    })
+    return request(`/torrent/list?${qs}`)
+  },
+  add:         (data)           => post('/torrent/add', data),
+}
+
 // ── Health ──
 export const healthApi = {
   check: () => request('/health'),

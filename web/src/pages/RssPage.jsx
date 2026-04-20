@@ -158,6 +158,7 @@ function RuleModal({ feedId, onClose, onSave }) {
     match: '', exclude: '', quality: '',
     min_size_gb: '', max_size_gb: '',
     link_type: 'any', action: 'auto_save', save_path: '',
+    torrent_client: '', torrent_save_path: '', torrent_category: '', torrent_tags: '', torrent_paused: false,
   })
   const [saving, setSaving] = useState(false)
 
@@ -231,6 +232,7 @@ function RuleModal({ feedId, onClose, onSave }) {
               <option value="alipan">阿里云盘</option>
               <option value="magnet">磁力链接</option>
               <option value="enclosure">Enclosure</option>
+              <option value="torrent_enclosure">Torrent 附件</option>
               <option value="web">网页链接</option>
             </select>
           </label>
@@ -243,12 +245,31 @@ function RuleModal({ feedId, onClose, onSave }) {
               className="w-full px-3 py-2 bg-surface-2 border border-surface-3 rounded-lg text-sm focus:outline-none focus:border-brand-500"
             >
               <option value="auto_save">自动转存</option>
+              <option value="torrent">推送 qBittorrent</option>
               <option value="notify">仅通知</option>
               <option value="log">仅记录</option>
             </select>
           </label>
 
           {form.action === 'auto_save' && F('存储路径', 'save_path', 'text', '/RSS转存')}
+
+          {form.action === 'torrent' && (
+            <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
+              <span className="text-xs text-gray-500 block">qBittorrent 参数</span>
+              {F('qB 客户端 ID', 'torrent_client', 'text', '留空使用默认')}
+              {F('下载保存路径', 'torrent_save_path', 'text', '/downloads/rss')}
+              <div className="grid grid-cols-2 gap-3">
+                {F('分类', 'torrent_category', 'text', 'rss')}
+                {F('标签', 'torrent_tags', 'text', '逗号分隔')}
+              </div>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={form.torrent_paused}
+                  onChange={e => setForm(f => ({ ...f, torrent_paused: e.target.checked }))}
+                  className="rounded border-surface-3" />
+                <span className="text-sm text-gray-300">添加后暂停</span>
+              </label>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 p-4 border-t border-surface-3">
@@ -717,10 +738,11 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       </span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                         rule.action === 'auto_save' ? 'bg-green-500/20 text-green-400' :
+                        rule.action === 'torrent' ? 'bg-purple-500/20 text-purple-400' :
                         rule.action === 'notify' ? 'bg-blue-500/20 text-blue-400' :
                         'bg-gray-500/20 text-gray-400'
                       }`}>
-                        {rule.action === 'auto_save' ? '自动转存' : rule.action === 'notify' ? '通知' : '记录'}
+                        {rule.action === 'auto_save' ? '自动转存' : rule.action === 'torrent' ? 'qBittorrent' : rule.action === 'notify' ? '通知' : '记录'}
                       </span>
                     </div>
                     <div className="space-y-0.5 text-xs">
@@ -732,6 +754,10 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       )}
                       <div><span className="text-gray-500">链接:</span> <span className="text-gray-300">{rule.link_type || 'any'}</span></div>
                       {rule.save_path && <div><span className="text-gray-500">路径:</span> <span className="text-gray-300">{rule.save_path}</span></div>}
+                      {rule.torrent_save_path && <div><span className="text-gray-500">qB 路径:</span> <span className="text-gray-300">{rule.torrent_save_path}</span></div>}
+                      {rule.torrent_category && <div><span className="text-gray-500">qB 分类:</span> <span className="text-gray-300">{rule.torrent_category}</span></div>}
+                      {rule.torrent_tags && <div><span className="text-gray-500">qB 标签:</span> <span className="text-gray-300">{rule.torrent_tags}</span></div>}
+                      {rule.torrent_client && <div><span className="text-gray-500">qB 实例:</span> <span className="text-gray-300">{rule.torrent_client}</span></div>}
                     </div>
                   </div>
                   <button
