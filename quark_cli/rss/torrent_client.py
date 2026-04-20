@@ -285,6 +285,55 @@ class QBittorrentClient(BaseTorrentClient):
         return resp.json()
 
 
+    # ── 暂停 / 恢复 / 删除 ──
+
+    def pause_torrents(self, hashes):
+        """暂停指定种子
+
+        Args:
+            hashes: hash 列表, 或 ["all"] 暂停全部
+        """
+        self._ensure_login()
+        h = "|".join(hashes) if isinstance(hashes, list) else str(hashes)
+        resp = self._session.post(
+            self._url("/api/v2/torrents/pause"),
+            data={"hashes": h},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
+    def resume_torrents(self, hashes):
+        """恢复指定种子
+
+        Args:
+            hashes: hash 列表, 或 ["all"] 恢复全部
+        """
+        self._ensure_login()
+        h = "|".join(hashes) if isinstance(hashes, list) else str(hashes)
+        resp = self._session.post(
+            self._url("/api/v2/torrents/resume"),
+            data={"hashes": h},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
+    def delete_torrents(self, hashes, delete_files=False):
+        """删除指定种子
+
+        Args:
+            hashes: hash 列表
+            delete_files: 是否同时删除已下载的文件
+        """
+        self._ensure_login()
+        h = "|".join(hashes) if isinstance(hashes, list) else str(hashes)
+        resp = self._session.post(
+            self._url("/api/v2/torrents/delete"),
+            data={"hashes": h, "deleteFiles": str(delete_files).lower()},
+            timeout=self.timeout,
+        )
+        resp.raise_for_status()
+
+
 # ═══════════════════════════════════════════════════
 #  工具函数
 # ═══════════════════════════════════════════════════

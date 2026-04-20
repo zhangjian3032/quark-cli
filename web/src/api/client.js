@@ -181,9 +181,10 @@ export const discoveryApi = {
 
 // ── Torrent (qBittorrent) ──
 export const torrentApi = {
+  // 兼容旧 API
   config:      ()               => request('/torrent/config'),
   updateConfig:(data)           => put('/torrent/config', data),
-  test:        (clientId=null)  => post('/torrent/test', clientId ? { client_id: clientId } : {}),
+  test:        (data={})        => post('/torrent/test', data),
   version:     (clientId=null)  => {
     let url = '/torrent/version'
     if (clientId) url += `?client_id=${encodeURIComponent(clientId)}`
@@ -201,6 +202,31 @@ export const torrentApi = {
     return request(`/torrent/list?${qs}`)
   },
   add:         (data)           => post('/torrent/add', data),
+
+  // 多实例管理
+  clients:       ()                        => request('/torrent/clients'),
+  addClient:     (data)                    => post('/torrent/clients', data),
+  updateClient:  (id, data)               => put(`/torrent/clients/${encodeURIComponent(id)}`, data),
+  deleteClient:  (id)                     => del_(`/torrent/clients/${encodeURIComponent(id)}`, {}),
+  setDefault:    (clientId)               => put('/torrent/clients/default', { client_id: clientId }),
+  testClient:    (id)                     => post(`/torrent/clients/${encodeURIComponent(id)}/test`, {}),
+
+  // 任务操作
+  pauseTask:     (hash, clientId = null)  => {
+    const qs = clientId ? `?client_id=${encodeURIComponent(clientId)}` : ''
+    return post(`/torrent/tasks/${encodeURIComponent(hash)}/pause${qs}`, {})
+  },
+  resumeTask:    (hash, clientId = null)  => {
+    const qs = clientId ? `?client_id=${encodeURIComponent(clientId)}` : ''
+    return post(`/torrent/tasks/${encodeURIComponent(hash)}/resume${qs}`, {})
+  },
+  deleteTask:    (hash, deleteFiles = false, clientId = null) => {
+    const params = new URLSearchParams()
+    if (clientId) params.set('client_id', clientId)
+    if (deleteFiles) params.set('delete_files', 'true')
+    const qs = params.toString() ? `?${params}` : ''
+    return del_(`/torrent/tasks/${encodeURIComponent(hash)}${qs}`, {})
+  },
 }
 
 // ── Health ──
