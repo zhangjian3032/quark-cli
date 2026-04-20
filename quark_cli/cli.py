@@ -349,6 +349,44 @@ Web 面板:
 
 
 
+    # ========== torrent (Torrent 客户端) ==========
+    torrent_parser = subparsers.add_parser("torrent", help="Torrent 客户端管理 (qBittorrent)")
+    torrent_sub = torrent_parser.add_subparsers(dest="torrent_action")
+
+    # torrent config
+    tc_config = torrent_sub.add_parser("config", help="配置 qBittorrent 连接")
+    tc_config.add_argument("--show", action="store_true", help="显示当前配置")
+    tc_config.add_argument("--host", default=None, help="qBittorrent 地址")
+    tc_config.add_argument("--port", type=int, default=None, help="端口 (默认 8080)")
+    tc_config.add_argument("--username", default=None, help="用户名 (默认 admin)")
+    tc_config.add_argument("--password", default=None, help="密码")
+    tc_config.add_argument("--use-https", action="store_true", default=False, help="使用 HTTPS")
+    tc_config.add_argument("--save-path", default=None, help="默认下载路径")
+    tc_config.add_argument("--category", default=None, help="默认分类")
+    tc_config.add_argument("--name", default=None, help="客户端名称")
+    tc_config.add_argument("--id", default=None, help="客户端 ID")
+
+    # torrent test
+    tc_test = torrent_sub.add_parser("test", help="测试 qBittorrent 连接")
+    tc_test.add_argument("--client-id", default=None, help="客户端 ID (不指定则用默认)")
+
+    # torrent list
+    tc_list = torrent_sub.add_parser("list", help="查看下载列表")
+    tc_list.add_argument("--client-id", default=None, help="客户端 ID")
+    tc_list.add_argument("--filter", default="all",
+                          choices=["all", "downloading", "seeding", "completed", "paused", "active"],
+                          help="状态过滤 (默认 all)")
+    tc_list.add_argument("--category", default="", help="分类过滤")
+    tc_list.add_argument("--limit", type=int, default=20, help="显示条数 (默认 20)")
+
+    # torrent add
+    tc_add = torrent_sub.add_parser("add", help="手动添加种子/磁力链接")
+    tc_add.add_argument("url", help="磁力链接或 .torrent URL")
+    tc_add.add_argument("--client-id", default=None, help="客户端 ID")
+    tc_add.add_argument("--save-path", default="", help="下载保存路径")
+    tc_add.add_argument("--category", default="", help="分类")
+    tc_add.add_argument("--paused", action="store_true", default=False, help="添加后暂停")
+
     # ========== rss (RSS 订阅) ==========
     rss_parser = subparsers.add_parser("rss", help="RSS 订阅管理 (Feed + 规则 + 自动转存)")
     rss_sub = rss_parser.add_subparsers(dest="rss_action")
@@ -400,13 +438,18 @@ Web 面板:
     rule_add.add_argument("--exclude", default="", help="排除正则")
     rule_add.add_argument("--quality", default="", help="画质正则 (如 4K|1080p)")
     rule_add.add_argument("--save-path", default="", help="转存路径")
-    rule_add.add_argument("--action", default="auto_save", choices=["auto_save", "notify", "log"],
-                           help="匹配后动作 (默认 auto_save)")
+    rule_add.add_argument("--action", default="auto_save", choices=["auto_save", "torrent", "notify", "log"],
+                           help="匹配后动作 (默认 auto_save; torrent = 推送到 qBittorrent)")
     rule_add.add_argument("--link-type", default="quark",
-                           choices=["quark", "alipan", "magnet", "enclosure", "web", "any"],
-                           help="优先链接类型 (默认 quark)")
+                           choices=["quark", "alipan", "magnet", "enclosure", "torrent_enclosure", "web", "any"],
+                           help="优先链接类型 (默认 quark; torrent 动作建议 enclosure/magnet)")
     rule_add.add_argument("--min-size", type=float, default=None, help="最小大小 (GB)")
     rule_add.add_argument("--max-size", type=float, default=None, help="最大大小 (GB)")
+    rule_add.add_argument("--torrent-save-path", default=None, help="[torrent] qB 下载路径")
+    rule_add.add_argument("--torrent-category", default=None, help="[torrent] qB 分类")
+    rule_add.add_argument("--torrent-tags", default=None, help="[torrent] qB 标签 (逗号分隔)")
+    rule_add.add_argument("--torrent-client", default=None, help="[torrent] 客户端 ID")
+    rule_add.add_argument("--torrent-paused", action="store_true", default=False, help="[torrent] 添加后暂停")
 
     rule_list = rule_sub.add_parser("list", help="查看规则列表")
     rule_list.add_argument("feed_id", help="Feed ID 或名称")
@@ -705,7 +748,7 @@ def main():
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
     from quark_cli.commands import media_cmd
-    from quark_cli.commands import sync_cmd, rss_cmd
+    from quark_cli.commands import sync_cmd, rss_cmd, torrent_cmd
 
     # serve 命令特殊处理 (不通过 handlers dict)
     if args.command == "serve":
@@ -729,6 +772,7 @@ def main():
         "media": media_cmd.handle,
         "sync": sync_cmd.handle,
         "rss": rss_cmd.handle,
+        "torrent": torrent_cmd.handle,
     }
 
     handler = handlers.get(args.command)

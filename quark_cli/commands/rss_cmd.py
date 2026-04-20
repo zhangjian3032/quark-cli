@@ -163,7 +163,15 @@ def _handle_show(args):
                 print("     画质: {}".format(rule["quality"]))
             if rule.get("save_path"):
                 print("     路径: {}".format(rule["save_path"]))
-            print("     动作: {} | 链接: {}".format(rule.get("action", "auto_save"), rule.get("link_type", "quark")))
+            action_str = rule.get("action", "auto_save")
+            print("     动作: {} | 链接: {}".format(action_str, rule.get("link_type", "quark")))
+            if action_str == "torrent":
+                if rule.get("torrent_save_path"):
+                    print("     qB路径: {}".format(rule["torrent_save_path"]))
+                if rule.get("torrent_category"):
+                    print("     qB分类: {}".format(rule["torrent_category"]))
+                if rule.get("torrent_tags"):
+                    print("     qB标签: {}".format(", ".join(rule["torrent_tags"])))
             print()
     else:
         print()
@@ -411,6 +419,23 @@ def _handle_rule_add(args):
         rule["min_size_gb"] = float(min_size)
     if max_size is not None:
         rule["max_size_gb"] = float(max_size)
+
+    # torrent 动作相关参数
+    torrent_save_path = getattr(args, "torrent_save_path", None)
+    torrent_category = getattr(args, "torrent_category", None)
+    torrent_tags = getattr(args, "torrent_tags", None)
+    torrent_client = getattr(args, "torrent_client", None)
+    torrent_paused = getattr(args, "torrent_paused", False)
+    if torrent_save_path is not None:
+        rule["torrent_save_path"] = torrent_save_path
+    if torrent_category is not None:
+        rule["torrent_category"] = torrent_category
+    if torrent_tags is not None:
+        rule["torrent_tags"] = [t.strip() for t in torrent_tags.split(",") if t.strip()]
+    if torrent_client is not None:
+        rule["torrent_client"] = torrent_client
+    if torrent_paused:
+        rule["torrent_paused"] = True
 
     try:
         rules = manager.add_rule(args.feed_id, rule)

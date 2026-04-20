@@ -32,6 +32,14 @@ DEFAULT_CONFIG = {
         },
     },
     "tasklist": [],
+    "torrent_clients": {
+        "default": "",
+        "qbittorrent": [],
+        "_reserved": {
+            "transmission": "Transmission RPC — 如有需求请反馈开发",
+            "aria2": "aria2 JSON-RPC — 如有需求请反馈开发",
+        },
+    },
 }
 
 

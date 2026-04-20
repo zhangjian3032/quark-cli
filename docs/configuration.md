@@ -90,6 +90,28 @@
     "enabled": true,
     "interval_minutes": 60,
     "auto_sign": true
+  },
+
+  "torrent_clients": {
+    "default": "qb1",
+    "qbittorrent": [
+      {
+        "id": "qb1",
+        "name": "NAS qBittorrent",
+        "host": "192.168.1.100",
+        "port": 8080,
+        "username": "admin",
+        "password": "your_password",
+        "use_https": false,
+        "default_save_path": "/downloads/rss",
+        "default_category": "RSS",
+        "default_tags": ["quark-cli", "rss"]
+      }
+    ],
+    "_reserved": {
+      "transmission": "Transmission RPC — 如有需求请反馈开发",
+      "aria2": "aria2 JSON-RPC — 如有需求请反馈开发"
+    }
   }
 }
 ```
@@ -159,6 +181,31 @@
 | `enabled` | 是否启用 |
 | `interval_minutes` | 检查间隔（分钟） |
 | `auto_sign` | 自动签到 |
+
+### torrent_clients — Torrent 下载客户端
+
+| 字段 | 说明 |
+|------|------|
+| `default` | 默认客户端 ID |
+| `qbittorrent[]` | qBittorrent 实例列表 |
+| `_reserved` | 预留客户端（Transmission / aria2，尚未实现） |
+
+#### qbittorrent[] — qBittorrent 实例
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | string | 客户端唯一 ID |
+| `name` | string | 显示名称 |
+| `host` | string | Web UI 地址 |
+| `port` | int | 端口（默认 8080） |
+| `username` | string | 用户名（默认 admin） |
+| `password` | string | 密码 |
+| `use_https` | bool | 是否使用 HTTPS |
+| `default_save_path` | string | 默认下载路径 |
+| `default_category` | string | 默认分类 |
+| `default_tags` | array | 默认标签列表 |
+
+> **预留客户端**：`_reserved` 字段中列出了计划支持但尚未实现的客户端。如有需求可在 Issue 中反馈，实现后只需在 `torrent_client.py` 中新增 Client 类即可。
 
 ## 环境变量覆盖
 

@@ -21,6 +21,7 @@
 | 📡 订阅追剧 | 自动追更 / 剧集追踪 |
 | 🔄 文件同步 | WebDAV 挂载 → NAS 本地同步 |
 | 🤖 飞书机器人 | 影视自动转存 Bot |
+| 📥 Torrent 推送 | RSS → qBittorrent 自动下载 (支持 magnet / .torrent) |
 | 🖥 Web 面板 | React + FastAPI 可视化管理 |
 
 ## Quick Start
@@ -89,6 +90,13 @@ quark-cli media auto-save "流浪地球2"
 
 # 文件同步
 quark-cli sync run --source /mnt/alist --dest /mnt/nas
+
+# 配置 qBittorrent
+quark-cli torrent config --host 192.168.1.100 --port 8080 --username admin --password xxx
+quark-cli torrent test
+
+# 手动推送种子
+quark-cli torrent add "magnet:?xt=urn:btih:xxxx..."
 
 # 启动飞书机器人
 quark-cli bot

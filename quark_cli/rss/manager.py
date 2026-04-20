@@ -417,7 +417,7 @@ class RssManager:
         # 6. 更新状态
         saved_count = sum(
             1 for a in result["actions"]
-            if a.get("success") and a.get("action") == "auto_save"
+            if a.get("success") and a.get("action") in ("auto_save", "torrent")
         )
         self._update_feed_state(
             feed, error="",

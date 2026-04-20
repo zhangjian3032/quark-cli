@@ -27,8 +27,13 @@ DEFAULT_RULE = {
     "min_size_gb": 0,          # 最小文件大小 GB (0 = 不限)
     "max_size_gb": 0,          # 最大文件大小 GB (0 = 不限)
     "save_path": "",           # 转存路径
-    "action": "auto_save",     # auto_save / notify / log
-    "link_type": "quark",      # 优先提取的链接类型: quark / alipan / magnet / enclosure / web / any
+    "action": "auto_save",     # auto_save / torrent / notify / log
+    "link_type": "quark",      # 优先提取的链接类型: quark / alipan / magnet / enclosure / torrent_enclosure / web / any
+    "torrent_client": "",      # torrent 动作: 指定客户端 ID (空 = 用 default)
+    "torrent_save_path": "",   # torrent 动作: qB 下载路径 (覆盖客户端默认)
+    "torrent_category": "",    # torrent 动作: qB 分类
+    "torrent_tags": [],        # torrent 动作: qB 标签列表
+    "torrent_paused": False,   # torrent 动作: 添加后是否暂停
     "enabled": True,
 }
 
@@ -180,8 +185,8 @@ def match_item(item, rule):
     link_type = rule.get("link_type", "quark")
     if link_type != "any":
         if not links.get(link_type):
-            # 如果指定了具体链接类型但找不到, 对 auto_save 动作跳过
-            if rule.get("action") == "auto_save":
+            # 如果指定了具体链接类型但找不到, 对需要链接的动作跳过
+            if rule.get("action") in ("auto_save", "torrent"):
                 return None
 
     matched_by = "rule:{}".format(rule.get("name", "unnamed"))

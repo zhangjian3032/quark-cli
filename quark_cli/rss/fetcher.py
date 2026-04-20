@@ -505,8 +505,11 @@ def fetch_feed(
 _QUARK_LINK_RE = re.compile(r"https?://pan\.quark\.cn/s/\w+")
 # 匹配阿里云盘链接
 _ALI_LINK_RE = re.compile(r"https?://www\.alipan\.com/s/\w+|https?://www\.aliyundrive\.com/s/\w+")
-# 匹配磁力链接
-_MAGNET_RE = re.compile(r"magnet:\?xt=urn:btih:[a-zA-Z0-9]+")
+# 匹配磁力链接 (增强版: 匹配完整 URI 含 dn/tr 等参数, 到空白或引号截止)
+_MAGNET_RE = re.compile(r"magnet:\?xt=urn:btih:[^\s\"<>]+")
+
+# Torrent 文件的 MIME 类型 (用于 enclosure 分类)
+TORRENT_MIME_TYPES = {"application/x-bittorrent", "application/x-torrent"}
 
 
 def extract_links(item):
@@ -518,8 +521,9 @@ def extract_links(item):
             "quark": [url, ...],
             "alipan": [url, ...],
             "magnet": [url, ...],
-            "web": [url, ...],      # 原始 link
-            "enclosure": [url, ...], # RSS enclosure (通常是种子)
+            "web": [url, ...],              # 原始 link
+            "enclosure": [url, ...],         # RSS enclosure (通常是种子)
+            "torrent_enclosure": [url, ...], # 明确为 torrent 的 enclosure
         }
     """
     text = " ".join([
@@ -528,11 +532,23 @@ def extract_links(item):
         item.link or "",
     ])
 
+    # 基础链接提取
     links = {
         "quark": list(set(_QUARK_LINK_RE.findall(text))),
         "alipan": list(set(_ALI_LINK_RE.findall(text))),
         "magnet": list(set(_MAGNET_RE.findall(text))),
         "web": [item.link] if item.link else [],
         "enclosure": [e["url"] for e in item.enclosures if e.get("url")],
+        "torrent_enclosure": [],
     }
+
+    # 对 enclosure 进一步分类: 识别 torrent 类型
+    for e in item.enclosures:
+        url = e.get("url", "")
+        mime = e.get("type", "")
+        if not url:
+            continue
+        if mime in TORRENT_MIME_TYPES or url.lower().endswith(".torrent"):
+            links["torrent_enclosure"].append(url)
+
     return links
