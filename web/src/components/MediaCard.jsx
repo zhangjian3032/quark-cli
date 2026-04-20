@@ -11,6 +11,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Star, Calendar, Film, Tv } from 'lucide-react'
 import { useState } from 'react'
+import { proxyImageUrl } from '../utils/image'
 
 function PosterPlaceholder({ title }) {
   const initials = (title || '??').slice(0, 2)
@@ -48,6 +49,9 @@ export default function MediaCard({ item, posterUrl, showType = false, tmdbMode 
     }
   }
 
+  // 通过代理处理防盗链图片
+  const imgSrc = proxyImageUrl(posterUrl)
+
   return (
     <div
       className="card-hover cursor-pointer overflow-hidden group"
@@ -55,9 +59,9 @@ export default function MediaCard({ item, posterUrl, showType = false, tmdbMode 
     >
       {/* Poster */}
       <div className="aspect-[2/3] overflow-hidden relative">
-        {posterUrl && !imgError ? (
+        {imgSrc && !imgError ? (
           <img
-            src={posterUrl}
+            src={imgSrc}
             alt={item.title}
             className="w-full h-full object-cover transition-transform duration-300
                        group-hover:scale-105"

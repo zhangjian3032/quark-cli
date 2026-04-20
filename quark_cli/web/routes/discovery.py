@@ -1,9 +1,33 @@
 """影视发现 API 路由 (支持多数据源: tmdb / douban)"""
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response
 from typing import Optional
 
+import requests as _requests
+import logging
+
+_logger = logging.getLogger("quark_cli.web.routes.discovery")
+
 router = APIRouter(tags=["discovery"])
+
+
+# ── 图片代理允许的域名后缀白名单 ──
+_PROXY_ALLOWED_SUFFIXES = (
+    ".doubanio.com",
+    ".douban.com",
+    "image.tmdb.org",
+)
+
+
+def _is_proxy_allowed(hostname):
+    """检查域名是否在图片代理白名单中 (后缀匹配)"""
+    if not hostname:
+        return False
+    for suffix in _PROXY_ALLOWED_SUFFIXES:
+        if hostname == suffix.lstrip(".") or hostname.endswith(suffix):
+            return True
+    return False
 
 
 def _get_svc(source=None):
@@ -118,6 +142,74 @@ def discovery_tags(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── 图片代理 ──
+
+@router.get("/discovery/img")
+def discovery_image_proxy(
+    url: str = Query(..., description="原始图片 URL (doubanio/tmdb)"),
+):
+    """
+    图片反向代理端点
+
+    解决豆瓣 doubanio.com 的 Referer 防盗链 (403 Forbidden)。
+    前端将外部图片 URL 改写为: /api/discovery/img?url=<encoded_url>
+    后端带合适的 Referer 向源站请求并转发。
+
+    安全: 仅允许白名单域名 (后缀匹配, 覆盖所有子域名)。
+    """
+    from urllib.parse import urlparse
+
+    if not url:
+        raise HTTPException(status_code=400, detail="缺少 url 参数")
+
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+
+    if not _is_proxy_allowed(host):
+        raise HTTPException(
+            status_code=403,
+            detail="域名 {} 不在图片代理白名单中".format(host),
+        )
+
+    # 根据域名设置 Referer
+    if "douban" in host:
+        referer = "https://movie.douban.com/"
+    elif "tmdb" in host:
+        referer = "https://www.themoviedb.org/"
+    else:
+        referer = ""
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    }
+    if referer:
+        headers["Referer"] = referer
+
+    # 获取代理设置
+    from quark_cli.web.deps import get_proxy_for
+    proxy_url = get_proxy_for("douban") if "douban" in host else get_proxy_for("tmdb")
+    proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+
+    try:
+        resp = _requests.get(url, headers=headers, timeout=15, proxies=proxies,
+                             allow_redirects=True, stream=True)
+        resp.raise_for_status()
+    except _requests.RequestException as e:
+        _logger.warning("图片代理失败: %s → %s", url[:80], e)
+        raise HTTPException(status_code=502, detail="获取图片失败: {}".format(str(e)[:100]))
+
+    content_type = resp.headers.get("Content-Type", "image/jpeg")
+
+    return Response(
+        content=resp.content,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=604800, immutable",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
 
 
 @router.get("/discovery/person/search")

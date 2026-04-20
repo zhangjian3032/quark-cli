@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import { PageSpinner, ErrorBanner, PageHeader } from '../components/UI'
+import { proxyImageUrl } from '../utils/image'
 
 function copyText(t) { navigator.clipboard.writeText(t).catch(() => {}) }
 
@@ -67,7 +68,7 @@ export default function TmdbDetailPage() {
           {/* Backdrop */}
           {m.backdrop_url && (
             <div className="h-[200px] overflow-hidden">
-              <img src={m.backdrop_url} alt=""
+              <img src={proxyImageUrl(m.backdrop_url)} alt=""
                 className="w-full h-full object-cover opacity-40" />
               <div className="absolute inset-0 bg-gradient-to-t from-surface-1 via-surface-1/80 to-transparent" />
             </div>
@@ -76,7 +77,7 @@ export default function TmdbDetailPage() {
           <div className={`flex gap-6 p-6 ${m.backdrop_url ? '-mt-24 relative z-10' : ''}`}>
             {/* Poster */}
             {m.poster_url ? (
-              <img src={m.poster_url} alt=""
+              <img src={proxyImageUrl(m.poster_url)} alt=""
                 className="w-[160px] rounded-lg shadow-2xl flex-shrink-0 border border-white/10" />
             ) : (
               <div className="w-[160px] aspect-[2/3] rounded-lg bg-surface-3 flex items-center justify-center flex-shrink-0">

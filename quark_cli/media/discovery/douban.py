@@ -538,51 +538,85 @@ class DoubanSource(DiscoverySource):
         )
 
 
+
     # ── 演员/人物 ──
 
     def search_person(self, query, page=1):
         # type: (str, int) -> PersonResult
-        """搜索演员 (豆瓣 Frodo 微信搜索接口)"""
-        count = 20
-        start = (page - 1) * count
+        """搜索演员 (使用豆瓣 Web /j/subject_suggest 接口)
+
+        该接口返回结果按相关性排列, 每项包含 type 字段:
+        - 'celebrity' → 影人
+        - 'movie' / 'tv' → 影视作品
+        我们只保留 type=='celebrity' 的结果。
+        """
         try:
-            data = self._frodo_get(
-                "/search/weixin",
-                {"q": query, "type": "celebrity", "start": start, "count": count},
-            )
+            data = self._web_get("/j/subject_suggest", {"q": query})
         except DoubanError:
             return PersonResult()
 
-        raw_items = data.get("items", [])
-        total = int(data.get("total", 0))
+        if not isinstance(data, list):
+            return PersonResult()
+
         items = []
-        for raw in raw_items:
-            target = raw.get("target", {})
-            if not target:
+        for raw in data:
+            if raw.get("type") != "celebrity":
                 continue
-            # 头像
-            avatar = ""
-            cover = target.get("cover_url", "") or ""
-            if not cover:
-                av_obj = target.get("avatar", {}) or {}
-                cover = av_obj.get("large", "") or av_obj.get("normal", "") or ""
-            avatar = cover
+
+            person_id = str(raw.get("id", ""))
+            if not person_id:
+                continue
+
+            avatar = raw.get("img", "")
+            name = raw.get("title", "")
+            original_name = raw.get("sub_title", "") or name
 
             items.append(PersonItem(
-                person_id=str(target.get("id", "")),
-                name=target.get("title", "") or target.get("name", ""),
-                original_name=target.get("latin_name", "") or target.get("title", ""),
+                person_id=person_id,
+                name=name,
+                original_name=original_name,
                 gender=0,
                 profile_path=avatar,
-                known_for_department=target.get("abstract", ""),
+                known_for_department="Acting",
                 popularity=0.0,
+                known_for=None,
                 extra={
-                    "douban_url": "https://movie.douban.com/celebrity/{}/".format(target.get("id", "")),
-                    "abstract": target.get("abstract", ""),
+                    "douban_url": "https://movie.douban.com/celebrity/{}/".format(person_id),
                 },
             ))
-        total_pages = max(1, (total + count - 1) // count)
-        return PersonResult(items=items, total=total, page=page, total_pages=total_pages)
+
+        # 为前 5 位结果补充代表作 (known_for)
+        for person in items[:5]:
+            try:
+                works = self._get_person_top_works(person.person_id, limit=3)
+                if works:
+                    person.known_for = works
+            except Exception:
+                pass
+
+        # subject_suggest 不支持分页, 一次性返回全部
+        total = len(items)
+        return PersonResult(items=items, total=total, page=1, total_pages=1)
+
+    def _get_person_top_works(self, person_id, limit=3):
+        """拉取演员评分最高的几部代表作, 返回 list[DiscoveryItem]"""
+        try:
+            data = self._frodo_get(
+                "/celebrity/{}/works".format(person_id),
+                {"start": 0, "count": limit, "sort": "vote"},
+            )
+        except DoubanError:
+            return []
+
+        works = []
+        for raw in data.get("works", [])[:limit]:
+            subject = raw.get("work", {}) or raw.get("subject", {})
+            if not subject:
+                continue
+            mt = "tv" if subject.get("subtype") == "tv" else "movie"
+            item = _parse_collection_item(subject, mt)
+            works.append(item)
+        return works
 
     def get_person_credits(self, person_id, media_type=None):
         # type: (str, str) -> list
@@ -602,7 +636,7 @@ class DoubanSource(DiscoverySource):
             raw_items = data.get("works", [])
             total = int(data.get("total", 0))
             for raw in raw_items:
-                subject = raw.get("subject", {})
+                subject = raw.get("work", {}) or raw.get("subject", {})
                 if not subject:
                     continue
                 mt = "tv" if subject.get("subtype") == "tv" else "movie"

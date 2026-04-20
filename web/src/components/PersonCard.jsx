@@ -8,6 +8,7 @@
 import { useNavigate } from 'react-router-dom'
 import { User, Film, Tv, Star } from 'lucide-react'
 import { useState } from 'react'
+import { proxyImageUrl } from '../utils/image'
 
 function ProfilePlaceholder({ name }) {
   const initials = (name || '??').slice(0, 1)
@@ -36,6 +37,9 @@ export default function PersonCard({ person, source = '' }) {
     Production: '制片',
   }
 
+  // 通过代理处理防盗链图片
+  const imgSrc = proxyImageUrl(person.profile_url)
+
   return (
     <div
       className="card-hover cursor-pointer overflow-hidden group"
@@ -43,9 +47,9 @@ export default function PersonCard({ person, source = '' }) {
     >
       {/* Profile photo */}
       <div className="aspect-[2/3] overflow-hidden relative">
-        {person.profile_url && !imgError ? (
+        {imgSrc && !imgError ? (
           <img
-            src={person.profile_url}
+            src={imgSrc}
             alt={person.name}
             className="w-full h-full object-cover transition-transform duration-300
                        group-hover:scale-105"
