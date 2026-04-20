@@ -70,6 +70,14 @@ export default function PersonDetailPage() {
     ? (allItems.reduce((s, c) => s + (c.rating || 0), 0) / allItems.length).toFixed(1)
     : '—'
 
+  /** 格式化角色/职务标签 */
+  const formatRole = (item) => {
+    if (item.character && item.job) return `${item.job} · ${item.character}`
+    if (item.character) return item.character
+    if (item.job) return item.job
+    return ''
+  }
+
   return (
     <>
       <PageHeader title="演员作品">
@@ -162,26 +170,28 @@ export default function PersonDetailPage() {
       {/* 作品网格 */}
       {sorted.length > 0 ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {sorted.map((item, idx) => (
-            <div key={item.source_id || idx} className="relative">
-              <MediaCard
-                item={item}
-                posterUrl={item.poster_url}
-                showType
-                tmdbMode
-                source={credits?.source || source || ''}
-              />
-              {/* Character / Job overlay */}
-              {(item.character || item.job) && (
-                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent
-                                px-3 py-2 pointer-events-none rounded-b-lg">
-                  <span className="text-[10px] text-gray-300 line-clamp-1">
-                    {item.character ? `饰 ${item.character}` : item.job}
-                  </span>
-                </div>
-              )}
-            </div>
-          ))}
+          {sorted.map((item, idx) => {
+            const roleText = formatRole(item)
+            return (
+              <div key={item.source_id || idx} className="relative">
+                <MediaCard
+                  item={item}
+                  posterUrl={item.poster_url}
+                  showType
+                  tmdbMode
+                  source={credits?.source || source || ''}
+                />
+                {roleText && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent
+                                  px-3 py-2 pointer-events-none rounded-b-lg">
+                    <span className="text-[10px] text-gray-300 line-clamp-1">
+                      {roleText}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
       ) : (
         <EmptyState icon={Film} title="暂无作品" description="未找到该演员的参演作品" />

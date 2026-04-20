@@ -5,6 +5,7 @@ import {
   Star, Calendar, Clock, Film, Tv, Tag, Zap, Download,
 } from 'lucide-react'
 import { discoveryApi } from '../api/client'
+import SearchInputWithHistory from '../components/SearchInputWithHistory'
 import { PageSpinner, EmptyState, PageHeader, ErrorBanner } from '../components/UI'
 
 export default function MetaPage() {
@@ -16,12 +17,13 @@ export default function MetaPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
 
-  const doSearch = (e) => {
-    e.preventDefault()
-    if (!query.trim()) return
+  const doSearch = (q) => {
+    const keyword = (q ?? query).trim()
+    if (!keyword) return
+    setQuery(keyword)
     setLoading(true)
     setError(null)
-    discoveryApi.meta(query.trim(), mediaType, null, source || null)
+    discoveryApi.meta(keyword, mediaType, null, source || null)
       .then(d => { setData(d); setLoading(false) })
       .catch(e => { setError(e.message); setLoading(false) })
   }
@@ -46,22 +48,18 @@ export default function MetaPage() {
     <>
       <PageHeader title="元数据查询" description="TMDB/豆瓣 影视信息 + 搜索关键词 + 保存路径建议" />
 
-      <form onSubmit={doSearch} className="flex gap-3 mb-8">
-        <div className="relative flex-1">
-          <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="输入影视名称，如 '流浪地球2'..."
-            className="input w-full pl-10"
-            autoFocus
-          />
-        </div>
+      <div className="flex gap-3 mb-8 items-start">
+        <SearchInputWithHistory
+          value={query}
+          onChange={setQuery}
+          onSearch={doSearch}
+          placeholder="输入影视名称，如 '流浪地球2'..."
+          historyNs="meta_search"
+        />
         <select
           value={mediaType}
           onChange={e => setMediaType(e.target.value)}
-          className="input w-24 text-sm"
+          className="input w-24 text-sm flex-shrink-0"
         >
           <option value="movie">电影</option>
           <option value="tv">剧集</option>
@@ -69,14 +67,13 @@ export default function MetaPage() {
         <select
           value={source}
           onChange={e => setSource(e.target.value)}
-          className="input w-20 text-sm"
+          className="input w-20 text-sm flex-shrink-0"
         >
           <option value="">自动</option>
           <option value="tmdb">TMDB</option>
           <option value="douban">豆瓣</option>
         </select>
-        <button type="submit" className="btn-primary" disabled={loading}>查询</button>
-      </form>
+      </div>
 
       {error && <ErrorBanner message={error} />}
 

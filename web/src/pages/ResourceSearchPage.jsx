@@ -9,6 +9,8 @@ import {
 import { useSearchParams } from 'react-router-dom'
 import { searchApi, shareApi, driveApi, mediaApi, discoveryApi, renameApi } from '../api/client'
 import { PageHeader, PageSpinner, EmptyState, ErrorBanner } from '../components/UI'
+import SearchInputWithHistory from '../components/SearchInputWithHistory'
+import { addSearchHistory } from '../utils/searchHistory'
 
 /* ════════════════════════════════════════════════
    目录选择器 (弹窗)
@@ -905,6 +907,7 @@ export default function ResourceSearchPage() {
 
   const doSearch = useCallback((kw) => {
     if (!kw.trim()) return
+    addSearchHistory('resource_search', kw.trim())
     setLoading(true)
     setError(null)
     setPreviewUrl(null)
@@ -960,24 +963,20 @@ export default function ResourceSearchPage() {
       {/* Search form */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         {/* Keyword search */}
-        <form onSubmit={handleSearch} className="card p-4">
+        <div className="card p-4">
           <div className="flex items-center gap-2 mb-2">
             <Search size={16} className="text-brand-400" />
             <span className="text-sm font-medium text-gray-300">关键词搜索</span>
           </div>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={keyword}
-              onChange={e => setKeyword(e.target.value)}
-              placeholder="输入影视名称搜索资源..."
-              className="input flex-1 text-sm"
-            />
-            <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? '搜索中...' : '搜索'}
-            </button>
-          </div>
-        </form>
+          <SearchInputWithHistory
+            value={keyword}
+            onChange={setKeyword}
+            onSearch={(q) => { setKeyword(q); setSuggestedPath(null); doSearch(q) }}
+            placeholder="输入影视名称搜索资源..."
+            historyNs="resource_search"
+            disabled={loading}
+          />
+        </div>
 
         {/* Direct URL */}
         <form onSubmit={handleCheckUrl} className="card p-4">

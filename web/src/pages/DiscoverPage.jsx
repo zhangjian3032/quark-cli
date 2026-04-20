@@ -1,8 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle, Database, UserSearch, Search } from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import MediaCard from '../components/MediaCard'
 import PersonCard from '../components/PersonCard'
+import SearchInputWithHistory from '../components/SearchInputWithHistory'
 import { PageSpinner, EmptyState, ErrorBanner, PageHeader, Pagination } from '../components/UI'
 
 /* ═══════════════════════════════════════════
@@ -147,12 +149,20 @@ function TagRow({ label, options, value, onChange, multi = false }) {
 }
 
 /* ═══════════════════════════════════════════
-   主页面
+   主页面 — 通过 URL searchParams 保持状态
    ═══════════════════════════════════════════ */
 export default function DiscoverPage() {
-  const [source, setSource] = useState('tmdb')
-  const [listType, setListType] = useState('top_rated')
-  const [mediaType, setMediaType] = useState('movie')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // ── 从 URL 恢复状态 ──
+  const urlSource    = searchParams.get('source') || ''
+  const urlListType  = searchParams.get('list')   || ''
+  const urlMediaType = searchParams.get('media')  || ''
+  const urlPersonQ   = searchParams.get('pq')     || ''
+
+  const [source, setSource] = useState(urlSource || 'tmdb')
+  const [listType, setListType] = useState(urlListType || 'top_rated')
+  const [mediaType, setMediaType] = useState(urlMediaType || 'movie')
   const [page, setPage] = useState(1)
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -172,20 +182,38 @@ export default function DiscoverPage() {
   const [availableSources, setAvailableSources] = useState([])
 
   // ── 演员搜索状态 ──
-  const [personQuery, setPersonQuery] = useState('')
+  const [personQuery, setPersonQuery] = useState(urlPersonQ)
   const [personResults, setPersonResults] = useState(null)
   const [personLoading, setPersonLoading] = useState(false)
   const [personPage, setPersonPage] = useState(1)
+
+  // ── 将关键状态同步到 URL (replace 模式, 不产生新历史条目) ──
+  const syncUrl = useCallback((overrides = {}) => {
+    const s = overrides.source ?? source
+    const l = overrides.listType ?? listType
+    const m = overrides.mediaType ?? mediaType
+    const pq = overrides.personQuery ?? personQuery
+
+    const params = new URLSearchParams()
+    if (s && s !== 'tmdb') params.set('source', s)
+    if (l && l !== 'top_rated') params.set('list', l)
+    if (m && m !== 'movie') params.set('media', m)
+    if (l === 'person' && pq) params.set('pq', pq)
+
+    setSearchParams(params, { replace: true })
+  }, [source, listType, mediaType, personQuery, setSearchParams])
 
   // 初始加载可用数据源
   useEffect(() => {
     discoveryApi.sources()
       .then(d => {
         setAvailableSources(d.sources || [])
-        // 如果 TMDB 不可用，自动切换到豆瓣
-        const tmdbAvail = (d.sources || []).find(s => s.name === 'tmdb')
-        if (!tmdbAvail || !tmdbAvail.available) {
-          setSource('douban')
+        // 如果 TMDB 不可用且没有 URL 指定数据源，自动切换到豆瓣
+        if (!urlSource) {
+          const tmdbAvail = (d.sources || []).find(s => s.name === 'tmdb')
+          if (!tmdbAvail || !tmdbAvail.available) {
+            setSource('douban')
+          }
         }
       })
       .catch(() => {})
@@ -213,19 +241,25 @@ export default function DiscoverPage() {
   const isPersonMode = listType === 'person'
 
   // ── 演员搜索 ──
-  const doPersonSearch = (p = 1) => {
-    if (!personQuery.trim()) return
+  const doPersonSearch = useCallback((q, p = 1) => {
+    const query = q ?? personQuery
+    if (!query.trim()) return
     setPersonLoading(true)
     setError(null)
     setPersonPage(p)
-    discoveryApi.personSearch(personQuery.trim(), p, source)
+    discoveryApi.personSearch(query.trim(), p, source)
       .then(d => { setPersonResults(d); setPersonLoading(false) })
       .catch(e => { setError(e.message); setPersonLoading(false) })
-  }
+  }, [personQuery, source])
 
-  const handlePersonKeyDown = (e) => {
-    if (e.key === 'Enter') doPersonSearch(1)
-  }
+  // URL 恢复: 如果 URL 有 personQuery 且当前是 person 模式, 自动搜索
+  const [initialPersonSearchDone, setInitialPersonSearchDone] = useState(false)
+  useEffect(() => {
+    if (isPersonMode && urlPersonQ && !initialPersonSearchDone) {
+      setInitialPersonSearchDone(true)
+      doPersonSearch(urlPersonQ, 1)
+    }
+  }, [isPersonMode, urlPersonQ, initialPersonSearchDone])
 
   const doFetch = (p = 1) => {
     setLoading(true)
@@ -295,6 +329,11 @@ export default function DiscoverPage() {
     }
   }, [listType])
 
+  // 同步 URL
+  useEffect(() => {
+    syncUrl()
+  }, [source, listType, mediaType, personQuery])
+
   const handleSourceChange = (s) => {
     setSource(s)
     setGenres([])
@@ -361,32 +400,20 @@ export default function DiscoverPage() {
           onChange={setListType}
         />
 
-        {/* ── 演员搜索输入框 ── */}
+        {/* ── 演员搜索输入框 (带历史) ── */}
         {isPersonMode && (
           <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
             <span className="text-xs text-gray-500 w-[72px] flex-shrink-0 text-right">搜索</span>
-            <div className="flex-1 flex gap-2">
-              <div className="relative flex-1">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  type="text"
-                  value={personQuery}
-                  onChange={(e) => setPersonQuery(e.target.value)}
-                  onKeyDown={handlePersonKeyDown}
-                  placeholder="输入演员/导演名称，如：周星驰、Leonardo DiCaprio"
-                  className="w-full pl-9 pr-3 py-2 text-sm text-white bg-surface-2 border border-surface-3
-                             rounded-lg focus:outline-none focus:border-brand-500 placeholder:text-gray-600
-                             transition-colors"
-                />
-              </div>
-              <button
-                onClick={() => doPersonSearch(1)}
-                disabled={!personQuery.trim()}
-                className="btn-primary text-sm px-4 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                搜索
-              </button>
-            </div>
+            <SearchInputWithHistory
+              value={personQuery}
+              onChange={setPersonQuery}
+              onSearch={(q) => {
+                setPersonQuery(q)
+                doPersonSearch(q, 1)
+              }}
+              placeholder="输入演员/导演名称"
+              historyNs="discover_person"
+            />
           </div>
         )}
 
@@ -473,7 +500,7 @@ export default function DiscoverPage() {
         )}
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={() => isPersonMode ? doPersonSearch(personPage) : doFetch(page)} />}
+      {error && <ErrorBanner message={error} onRetry={() => isPersonMode ? doPersonSearch(personQuery, personPage) : doFetch(page)} />}
 
       {/* ── 演员搜索结果 ── */}
       {isPersonMode ? (
@@ -497,7 +524,7 @@ export default function DiscoverPage() {
               <Pagination
                 page={personResults.page}
                 totalPages={personResults.total_pages}
-                onChange={p => doPersonSearch(p)}
+                onChange={p => doPersonSearch(personQuery, p)}
               />
             )}
           </>

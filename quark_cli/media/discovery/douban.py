@@ -618,6 +618,27 @@ class DoubanSource(DiscoverySource):
             works.append(item)
         return works
 
+
+    @staticmethod
+    def _parse_douban_role(role_str):
+        """解析豆瓣角色字符串, 返回 (job, character)
+
+        示例:
+        - '演员 (饰 蒋介石)' → ('演员', '蒋介石')
+        - '演员 - 配音'      → ('演员', '配音')
+        - '编剧 - 联合编剧'  → ('编剧', '联合编剧')
+        - '导演'             → ('导演', '')
+        """
+        import re
+        role_str = role_str.strip()
+        m = re.match(r'^(.+?)\s*\(饰\s+(.+?)\)$', role_str)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        m = re.match(r'^(.+?)\s*-\s*(.+)$', role_str)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        return role_str, ''
+
     def get_person_credits(self, person_id, media_type=None):
         # type: (str, str) -> list
         """获取演员参演作品 (豆瓣影人作品, 按评分排序)"""
@@ -643,10 +664,21 @@ class DoubanSource(DiscoverySource):
                 if media_type and mt != media_type:
                     continue
                 item = _parse_collection_item(subject, mt)
-                # 附加角色信息
+                # 解析角色信息
                 roles = raw.get("roles", [])
                 if roles:
-                    item.extra["character"] = " / ".join(roles)
+                    characters = []
+                    jobs = []
+                    for role_str in roles:
+                        job, character = self._parse_douban_role(role_str)
+                        if character:
+                            characters.append(character)
+                        if job:
+                            jobs.append(job)
+                    if characters:
+                        item.extra["character"] = " / ".join(characters)
+                    if jobs:
+                        item.extra["job"] = " / ".join(jobs)
                 items.append(item)
             start += count
             if start >= total or not raw_items:
