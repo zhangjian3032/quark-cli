@@ -52,6 +52,18 @@ def _get_primary_genre(genres):
     return _GENRE_FOLDER_MAP.get(first, first)
 
 
+def _read_flat_from_config():
+    # type: () -> bool
+    """从配置文件读取 autosave.flat_save_path 设置"""
+    try:
+        from quark_cli.config import ConfigManager, get_config_path
+        cfg = ConfigManager(get_config_path())
+        cfg.load()
+        return bool(cfg.data.get("autosave", {}).get("flat_save_path", False))
+    except Exception:
+        return False
+
+
 def suggest_search_keywords(item):
     # type: (...) -> list
     """
@@ -90,8 +102,8 @@ def suggest_search_keywords(item):
     return result
 
 
-def suggest_save_path(item, base_path="/媒体", flat=False):
-    # type: (..., str, bool) -> list
+def suggest_save_path(item, base_path="/媒体", flat=None):
+    # type: (..., str, ...) -> list
     """
     根据 DiscoveryItem 生成标准保存路径建议列表。
     遵循 Plex / Emby 命名规范。
@@ -100,6 +112,8 @@ def suggest_save_path(item, base_path="/媒体", flat=False):
         item: DiscoveryItem 元数据
         base_path: 保存根路径
         flat: 平铺模式 — 不加 电影/剧集 类型前缀，所有内容直接放在 base_path 下
+              True/False: 显式指定
+              None (默认): 自动从配置文件读取 autosave.flat_save_path
 
     返回 list[dict]，每个元素:
     {
@@ -115,6 +129,10 @@ def suggest_save_path(item, base_path="/媒体", flat=False):
       平铺模式:
         /{base}/{标题} ({年份})
     """
+    # flat=None → 自动从配置读取
+    if flat is None:
+        flat = _read_flat_from_config()
+
     title = _sanitize(item.title or item.original_title or "Unknown")
     year = (item.year or "").strip()
     media_type = (item.media_type or "movie").lower()
