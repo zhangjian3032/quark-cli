@@ -162,6 +162,21 @@ export const discoveryApi = {
     return request(url)
   },
   sources: () => request('/discovery/sources'),
+
+  // ── 演员/人物搜索 ──
+  personSearch: (q, page = 1, source = null) => {
+    let url = `/discovery/person/search?q=${encodeURIComponent(q)}&page=${page}`
+    if (source) url += `&source=${encodeURIComponent(source)}`
+    return request(url)
+  },
+  personCredits: (personId, mediaType = null, source = null) => {
+    let url = `/discovery/person/${encodeURIComponent(personId)}/credits`
+    const params = []
+    if (mediaType) params.push(`media_type=${encodeURIComponent(mediaType)}`)
+    if (source) params.push(`source=${encodeURIComponent(source)}`)
+    if (params.length > 0) url += `?${params.join('&')}`
+    return request(url)
+  },
 }
 
 // ── Health ──

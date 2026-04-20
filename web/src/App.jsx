@@ -11,6 +11,7 @@ import DrivePage from './pages/DrivePage'
 import ResourceSearchPage from './pages/ResourceSearchPage'
 import ConfigPage from './pages/ConfigPage'
 import TmdbDetailPage from './pages/TmdbDetailPage'
+import PersonDetailPage from './pages/PersonDetailPage'
 import SchedulerPage from './pages/SchedulerPage'
 import SyncPage from './pages/SyncPage'
 import SubscriptionPage from './pages/SubscriptionPage'
@@ -165,6 +166,7 @@ export default function App() {
             <Route path="/library/:libId" element={<LibraryPage />} />
             <Route path="/detail/:guid" element={<DetailPage />} />
             <Route path="/discover" element={<DiscoverPage />} />
+            <Route path="/discover/person/:personId" element={<PersonDetailPage />} />
             <Route path="/discover/:tmdbId" element={<TmdbDetailPage />} />
             <Route path="/meta" element={<MetaPage />} />
             <Route path="/drive" element={<DrivePage />} />

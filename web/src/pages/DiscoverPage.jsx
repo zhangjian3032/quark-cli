@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle, Database } from 'lucide-react'
+import { Star, TrendingUp, Flame, SlidersHorizontal, RotateCcw, Shuffle, Database, UserSearch, Search } from 'lucide-react'
 import { discoveryApi } from '../api/client'
 import MediaCard from '../components/MediaCard'
+import PersonCard from '../components/PersonCard'
 import { PageSpinner, EmptyState, ErrorBanner, PageHeader, Pagination } from '../components/UI'
 
 /* ═══════════════════════════════════════════
@@ -13,6 +14,7 @@ const LIST_TYPES = [
   { key: 'trending',  label: '趋势', icon: TrendingUp },
   { key: 'discover',  label: '筛选', icon: SlidersHorizontal },
   { key: 'random',    label: '随机', icon: Shuffle },
+  { key: 'person',    label: '演员', icon: UserSearch },
 ]
 
 const MEDIA_TYPES = [
@@ -169,6 +171,12 @@ export default function DiscoverPage() {
   const [doubanTags, setDoubanTags] = useState([])
   const [availableSources, setAvailableSources] = useState([])
 
+  // ── 演员搜索状态 ──
+  const [personQuery, setPersonQuery] = useState('')
+  const [personResults, setPersonResults] = useState(null)
+  const [personLoading, setPersonLoading] = useState(false)
+  const [personPage, setPersonPage] = useState(1)
+
   // 初始加载可用数据源
   useEffect(() => {
     discoveryApi.sources()
@@ -202,6 +210,22 @@ export default function DiscoverPage() {
   }, [source, mediaType])
 
   const isDouban = source === 'douban'
+  const isPersonMode = listType === 'person'
+
+  // ── 演员搜索 ──
+  const doPersonSearch = (p = 1) => {
+    if (!personQuery.trim()) return
+    setPersonLoading(true)
+    setError(null)
+    setPersonPage(p)
+    discoveryApi.personSearch(personQuery.trim(), p, source)
+      .then(d => { setPersonResults(d); setPersonLoading(false) })
+      .catch(e => { setError(e.message); setPersonLoading(false) })
+  }
+
+  const handlePersonKeyDown = (e) => {
+    if (e.key === 'Enter') doPersonSearch(1)
+  }
 
   const doFetch = (p = 1) => {
     setLoading(true)
@@ -257,9 +281,9 @@ export default function DiscoverPage() {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
-  // 非 discover 模式切换时自动刷新
+  // 非 discover / person 模式切换时自动刷新
   useEffect(() => {
-    if (listType !== 'discover') {
+    if (listType !== 'discover' && listType !== 'person') {
       doFetch(1)
     }
   }, [listType, mediaType, source])
@@ -278,6 +302,10 @@ export default function DiscoverPage() {
     setCountry('')
     setYear('')
     setSortBy(s === 'douban' ? 'recommend' : 'vote_average.desc')
+    // 如果在演员模式，清空结果让用户重新搜索
+    if (isPersonMode) {
+      setPersonResults(null)
+    }
   }
 
   const handleReset = () => {
@@ -315,13 +343,15 @@ export default function DiscoverPage() {
           onChange={handleSourceChange}
         />
 
-        {/* 影视类型 */}
-        <TagRow
-          label="影视类型"
-          options={MEDIA_TYPES}
-          value={mediaType}
-          onChange={(v) => { setMediaType(v); setGenres([]); setDoubanTag('') }}
-        />
+        {/* 影视类型 (演员模式下隐藏) */}
+        {!isPersonMode && (
+          <TagRow
+            label="影视类型"
+            options={MEDIA_TYPES}
+            value={mediaType}
+            onChange={(v) => { setMediaType(v); setGenres([]); setDoubanTag('') }}
+          />
+        )}
 
         {/* 列表类型 */}
         <TagRow
@@ -330,6 +360,35 @@ export default function DiscoverPage() {
           value={listType}
           onChange={setListType}
         />
+
+        {/* ── 演员搜索输入框 ── */}
+        {isPersonMode && (
+          <div className="flex items-center gap-3 px-4 py-3 border-t border-white/5">
+            <span className="text-xs text-gray-500 w-[72px] flex-shrink-0 text-right">搜索</span>
+            <div className="flex-1 flex gap-2">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={personQuery}
+                  onChange={(e) => setPersonQuery(e.target.value)}
+                  onKeyDown={handlePersonKeyDown}
+                  placeholder="输入演员/导演名称，如：周星驰、Leonardo DiCaprio"
+                  className="w-full pl-9 pr-3 py-2 text-sm text-white bg-surface-2 border border-surface-3
+                             rounded-lg focus:outline-none focus:border-brand-500 placeholder:text-gray-600
+                             transition-colors"
+                />
+              </div>
+              <button
+                onClick={() => doPersonSearch(1)}
+                disabled={!personQuery.trim()}
+                className="btn-primary text-sm px-4 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                搜索
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── discover / random 模式才显示以下筛选项 ── */}
         {(listType === 'discover' || listType === 'random') && (
@@ -414,37 +473,71 @@ export default function DiscoverPage() {
         )}
       </div>
 
-      {error && <ErrorBanner message={error} onRetry={() => doFetch(page)} />}
+      {error && <ErrorBanner message={error} onRetry={() => isPersonMode ? doPersonSearch(personPage) : doFetch(page)} />}
 
-      {loading ? (
-        <PageSpinner />
-      ) : data?.items?.length > 0 ? (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {data.items.map(item => (
-              <MediaCard
-                key={item.source_id || item.tmdb_id || item.douban_id}
-                item={item}
-                posterUrl={item.poster_url}
-                showType
-                tmdbMode
-                source={data.source || source}
-              />
-            ))}
-          </div>
-          {listType === 'random' ? (
-            <div className="flex justify-center mt-8">
-              <button onClick={() => doFetch(1)}
-                className="btn-primary flex items-center gap-2">
-                <Shuffle size={16} /> 换一批
-              </button>
+      {/* ── 演员搜索结果 ── */}
+      {isPersonMode ? (
+        personLoading ? (
+          <PageSpinner />
+        ) : personResults?.results?.length > 0 ? (
+          <>
+            <div className="text-xs text-gray-500 mb-4">
+              共找到 {personResults.total || personResults.results.length} 位相关人物
             </div>
-          ) : (
-            <Pagination page={data.page} totalPages={data.total_pages} onChange={p => doFetch(p)} />
-          )}
-        </>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {personResults.results.map(person => (
+                <PersonCard
+                  key={person.person_id}
+                  person={person}
+                  source={personResults.source || source}
+                />
+              ))}
+            </div>
+            {personResults.total_pages > 1 && (
+              <Pagination
+                page={personResults.page}
+                totalPages={personResults.total_pages}
+                onChange={p => doPersonSearch(p)}
+              />
+            )}
+          </>
+        ) : personResults ? (
+          <EmptyState icon={UserSearch} title="未找到相关演员" description="换个名字试试" />
+        ) : (
+          <EmptyState icon={UserSearch} title="搜索演员" description="输入演员或导演名称开始搜索" />
+        )
       ) : (
-        <EmptyState icon={Star} title="暂无结果" description="换个条件试试" />
+        /* ── 影视列表结果 ── */
+        loading ? (
+          <PageSpinner />
+        ) : data?.items?.length > 0 ? (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {data.items.map(item => (
+                <MediaCard
+                  key={item.source_id || item.tmdb_id || item.douban_id}
+                  item={item}
+                  posterUrl={item.poster_url}
+                  showType
+                  tmdbMode
+                  source={data.source || source}
+                />
+              ))}
+            </div>
+            {listType === 'random' ? (
+              <div className="flex justify-center mt-8">
+                <button onClick={() => doFetch(1)}
+                  className="btn-primary flex items-center gap-2">
+                  <Shuffle size={16} /> 换一批
+                </button>
+              </div>
+            ) : (
+              <Pagination page={data.page} totalPages={data.total_pages} onChange={p => doFetch(p)} />
+            )}
+          </>
+        ) : (
+          <EmptyState icon={Star} title="暂无结果" description="换个条件试试" />
+        )
       )}
     </>
   )
