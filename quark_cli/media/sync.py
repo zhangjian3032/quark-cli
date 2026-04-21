@@ -65,6 +65,13 @@ class FileProgress:
             return 0.0
         return min(100.0, self.copied / self.size * 100)
 
+    @property
+    def eta(self) -> float:
+        """预计剩余时间 (秒)"""
+        if self.speed <= 0 or self.copied >= self.size:
+            return 0.0
+        return (self.size - self.copied) / self.speed
+
 
 @dataclass
 class SyncProgress:
@@ -105,6 +112,14 @@ class SyncProgress:
             return 0.0
         return self.copied_bytes / e
 
+    @property
+    def eta(self) -> float:
+        """预计剩余时间 (秒)"""
+        s = self.speed
+        if s <= 0 or self.copied_bytes >= self.total_bytes:
+            return 0.0
+        return (self.total_bytes - self.copied_bytes) / s
+
     def to_dict(self) -> dict:
         """序列化为可 JSON 输出的 dict"""
         d = {
@@ -123,6 +138,8 @@ class SyncProgress:
             "elapsed": round(self.elapsed, 1),
             "speed": round(self.speed),
             "speed_human": _format_speed(self.speed),
+            "eta": round(self.eta),
+            "eta_human": _format_duration(self.eta),
             "errors": self.errors[-10:],  # 最后 10 条错误
         }
         # 已拷贝的文件列表 (含文件名和大小)
@@ -145,6 +162,8 @@ class SyncProgress:
                 "percent": round(self.current_file.percent, 1),
                 "speed": round(self.current_file.speed),
                 "speed_human": _format_speed(self.current_file.speed),
+                "eta": round(self.current_file.eta),
+                "eta_human": _format_duration(self.current_file.eta),
                 "status": self.current_file.status,
             }
         return d
@@ -161,6 +180,20 @@ def _format_speed(bps: float) -> str:
     if bps < 1024 * 1024 * 1024:
         return "{:.1f} MB/s".format(bps / 1024 / 1024)
     return "{:.2f} GB/s".format(bps / 1024 / 1024 / 1024)
+
+
+def _format_duration(seconds: float) -> str:
+    """格式化剩余时间"""
+    if seconds <= 0:
+        return ""
+    s = int(seconds)
+    if s < 60:
+        return "{}s".format(s)
+    if s < 3600:
+        return "{}m {:02d}s".format(s // 60, s % 60)
+    h = s // 3600
+    m = (s % 3600) // 60
+    return "{}h {:02d}m".format(h, m)
 
 
 def _format_size(n: int) -> str:

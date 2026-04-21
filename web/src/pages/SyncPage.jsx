@@ -35,11 +35,11 @@ function StatusBadge({ status }) {
   return <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${cls}`}>{label}</span>
 }
 
-function ProgressBar({ percent, speed }) {
+function ProgressBar({ percent, speed, eta }) {
   return (
     <div>
       <div className="flex justify-between text-xs text-gray-400 mb-1">
-        <span>{percent.toFixed(1)}%</span>
+        <span>{percent.toFixed(1)}%{eta ? ` · 剩余 ${eta}` : ''}</span>
         <span>{speed}</span>
       </div>
       <div className="w-full bg-surface-3 rounded-full h-2">
@@ -605,7 +605,7 @@ export default function SyncPage() {
                 )}
               </div>
               {task.total_bytes > 0 && (
-                <ProgressBar percent={task.percent || 0} speed={task.speed_human || '0 B/s'} />
+                <ProgressBar percent={task.percent || 0} speed={task.speed_human || '0 B/s'} eta={task.eta_human} />
               )}
               <div className="grid grid-cols-2 gap-2 sm:gap-3 text-xs">
                 <div className="bg-surface-2 rounded-lg p-2.5">
@@ -629,7 +629,7 @@ export default function SyncPage() {
                 <div className="bg-surface-2 rounded-lg p-3 text-xs">
                   <div className="flex items-center justify-between text-gray-400 mb-1">
                     <span className="truncate mr-2">▸ {task.current_file.filename}</span>
-                    <span className="shrink-0">{task.current_file.speed_human}</span>
+                    <span className="shrink-0">{task.current_file.eta_human ? `${task.current_file.eta_human} · ` : ''}{task.current_file.speed_human}</span>
                   </div>
                   <div className="w-full bg-surface-3 rounded-full h-1.5">
                     <div className="bg-brand-400 h-1.5 rounded-full transition-all duration-300"
