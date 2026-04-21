@@ -29,7 +29,8 @@ import os
 import shutil
 import fnmatch
 import time
-import queue
+import re as _re
+import subprocess
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -208,7 +209,7 @@ class SyncEngine:
             dest_dir=str(self.dest_dir),
         )
         self._cancelled = False
-        self._active_src_handle = None
+        self._active_rsync_proc = None
         self._lock = threading.Lock()
 
     @property
@@ -216,13 +217,13 @@ class SyncEngine:
         return self._progress
 
     def cancel(self):
-        """取消同步 — 同时中断正在进行的 FUSE 读操作"""
+        """取消同步 — 终止正在运行的 rsync 进程"""
         self._cancelled = True
-        # 关闭正在读取的源文件句柄，中断阻塞的 FUSE read()
-        handle = getattr(self, "_active_src_handle", None)
-        if handle:
+        # 终止 rsync 子进程
+        proc = getattr(self, "_active_rsync_proc", None)
+        if proc and proc.returncode is None:
             try:
-                handle.close()
+                proc.terminate()
             except OSError:
                 pass
 
@@ -359,11 +360,11 @@ class SyncEngine:
 
     def _copy_file(self, src_path: str, dst_path: str, size: int) -> FileProgress:
         """
-        双缓冲异步文件拷贝
+        基于 rsync 的高性能文件拷贝
 
-        使用 reader 线程 + writer 线程通过 queue 传递数据块，
-        使 FUSE 读取和磁盘写入并行执行，充分利用两端带宽。
+        调用系统 rsync 获得 zero-copy / sendfile 级别的拷贝性能。
         先写入 dst_path + ".quark_tmp" 临时文件，完成后 rename 为正式文件。
+        通过 --info=progress2 解析实时进度。
         """
         fp = FileProgress(
             src=src_path,
@@ -383,158 +384,122 @@ class SyncEngine:
         tmp_path = dst_path + TEMP_SUFFIX
 
         copy_start = time.time()
-
-        # 双缓冲队列: 最多预读 2 个 chunk，平衡内存占用与流水线效率
-        buf_q: queue.Queue = queue.Queue(maxsize=8)
-        _SENTINEL = object()  # 读取结束哨兵
-        read_error = [None]   # reader 线程异常容器
-
-        def _reader():
-            """后台线程: 从 FUSE/WebDAV 源读取数据块"""
-            try:
-                while not self._cancelled:
-                    chunk = fsrc.read(self.buffer_size)
-                    if not chunk:
-                        break
-                    # 非阻塞入队: cancel 时队列可能已满，避免线程卡死
-                    while not self._cancelled:
-                        try:
-                            buf_q.put(chunk, timeout=0.5)
-                            break
-                        except queue.Full:
-                            continue
-            except Exception as e:
-                # 文件句柄被 cancel() 关闭时会抛 ValueError/OSError
-                if not self._cancelled:
-                    read_error[0] = e
-            finally:
-                # 哨兵也用非阻塞: 防止 writer 已退出导致队列满
-                while True:
-                    try:
-                        buf_q.put(_SENTINEL, timeout=0.5)
-                        break
-                    except queue.Full:
-                        if self._cancelled:
-                            break
+        proc = None
 
         try:
-            fsrc = open(src_path, "rb")
-            self._active_src_handle = fsrc  # 允许 cancel() 中断读取
-
-            fdst = open(tmp_path, "wb")
-
-            copied = 0
-            last_report = copy_start
-
-            # 启动 reader 线程
-            reader_t = threading.Thread(
-                target=_reader, daemon=True,
-                name="sync-reader-{}".format(os.path.basename(src_path)[:32]),
+            # rsync 单文件拷贝: -a 保留时间, --info=progress2 输出全局进度行
+            # --no-compress: 本地拷贝不需要压缩
+            cmd = [
+                "rsync", "-a", "--no-compress",
+                "--info=progress2", "--no-inc-recursive",
+                src_path, tmp_path,
+            ]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0,
             )
-            reader_t.start()
+            self._active_rsync_proc = proc
 
-            # 主线程负责写入
+            # 解析 rsync --info=progress2 的输出
+            # 格式:  1,234,567  25%   12.34MB/s   0:00:05 (xfr#1, to-chk=0/1)
+            progress_re = _re.compile(
+                r"[\s]*([\d,]+)\s+(\d+)%\s+([\d.]+\S+/s)"
+            )
+            last_report = copy_start
+            buf = b""
+
             while True:
                 if self._cancelled:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                        proc.wait(timeout=5)
                     fp.status = "error"
                     fp.error = "cancelled"
                     break
 
-                try:
-                    chunk = buf_q.get(timeout=0.5)
-                except queue.Empty:
-                    continue
-
-                if chunk is _SENTINEL:
+                # 非阻塞读: 每次读一小块
+                data = proc.stdout.read(256)
+                if not data:
+                    # 进程输出结束
                     break
+                buf += data
 
-                fdst.write(chunk)
-                copied += len(chunk)
-                fp.copied = copied
+                # 按 \r 或 \n 切分进度行
+                while b"\r" in buf or b"\n" in buf:
+                    # 找最早的分隔符
+                    ri = buf.find(b"\r")
+                    ni = buf.find(b"\n")
+                    if ri < 0:
+                        ri = len(buf)
+                    if ni < 0:
+                        ni = len(buf)
+                    idx = min(ri, ni)
+                    line = buf[:idx].decode("utf-8", errors="replace").strip()
+                    buf = buf[idx + 1:]
 
-                # 计算速度
-                now = time.time()
-                elapsed = now - copy_start
-                if elapsed > 0:
-                    fp.speed = copied / elapsed
+                    if not line:
+                        continue
 
-                # 限制回调频率: 每 0.5 秒
-                if now - last_report >= 0.5:
-                    with self._lock:
-                        self._progress.copied_bytes = (
-                            self._progress.copied_bytes
-                            - (fp.copied - len(chunk))
-                            + fp.copied
-                        )
-                    self._notify()
-                    last_report = now
+                    m = progress_re.search(line)
+                    if m:
+                        copied_str = m.group(1).replace(",", "")
+                        copied = int(copied_str)
+                        fp.copied = copied
 
-            # 等待 reader 结束 (先排空队列，防止 reader 卡在 put)
-            while not buf_q.empty():
-                try:
-                    buf_q.get_nowait()
-                except queue.Empty:
-                    break
-            reader_t.join(timeout=5)
-            self._active_src_handle = None
+                        now = time.time()
+                        elapsed = now - copy_start
+                        if elapsed > 0:
+                            fp.speed = copied / elapsed
 
-            # 检查 reader 是否有异常
-            if read_error[0] is not None:
-                raise read_error[0]
+                        # 限制回调频率: 每 0.5 秒
+                        if now - last_report >= 0.5:
+                            with self._lock:
+                                # 更新总进度
+                                prev = sum(
+                                    f.size for f in self._progress.files
+                                    if f.status in ("done", "skipped")
+                                )
+                                self._progress.copied_bytes = prev + fp.copied
+                            self._notify()
+                            last_report = now
+
+            # 等待进程结束
+            if proc.returncode is None:
+                proc.wait(timeout=30)
+            self._active_rsync_proc = None
 
             if fp.status == "cancelled":
                 raise Exception("cancelled")
 
-            # 确保数据落盘
-            fdst.flush()
-            os.fsync(fdst.fileno())
-            fdst.close()
-            fdst = None
-            fsrc.close()
-            fsrc = None
+            if proc.returncode != 0:
+                stderr = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                raise OSError("rsync failed (code {}): {}".format(proc.returncode, stderr[:500]))
 
-            # rename 为正式文件
+            # rsync 写到了 tmp_path — rename 为正式文件 (原子操作)
             self._safe_rename(tmp_path, dst_path)
-
-            # 保留修改时间
-            try:
-                st = os.stat(src_path)
-                os.utime(dst_path, (st.st_atime, st.st_mtime))
-            except OSError:
-                pass
 
             fp.status = "done"
             fp.copied = size  # 确保 100%
             logger.info("已同步: %s (%s)", fp.filename, _format_size(size))
 
         except Exception as e:
-            self._active_src_handle = None
+            self._active_rsync_proc = None
+            if proc and proc.returncode is None:
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except OSError:
+                    pass
             if fp.status != "error":
                 fp.status = "error"
                 fp.error = str(e) if str(e) != "cancelled" else "cancelled"
                 if str(e) != "cancelled":
                     logger.error("同步失败: %s — %s", fp.filename, e)
-            # 关闭文件句柄
-            try:
-                if fsrc and not fsrc.closed:
-                    fsrc.close()
-            except OSError:
-                pass
-            try:
-                if fdst and not fdst.closed:
-                    fdst.close()
-            except OSError:
-                pass
-            # 排空队列 + 等待 reader 线程退出 (防止线程泄漏)
-            try:
-                while not buf_q.empty():
-                    try:
-                        buf_q.get_nowait()
-                    except queue.Empty:
-                        break
-                reader_t.join(timeout=5)
-            except (NameError, AttributeError):
-                pass  # reader_t 可能未创建
             # 删除不完整的临时文件
             try:
                 if os.path.exists(tmp_path):
