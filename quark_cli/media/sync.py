@@ -29,6 +29,7 @@ import os
 import shutil
 import fnmatch
 import time
+import queue
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -207,6 +208,7 @@ class SyncEngine:
             dest_dir=str(self.dest_dir),
         )
         self._cancelled = False
+        self._active_src_handle = None
         self._lock = threading.Lock()
 
     @property
@@ -214,8 +216,15 @@ class SyncEngine:
         return self._progress
 
     def cancel(self):
-        """取消同步"""
+        """取消同步 — 同时中断正在进行的 FUSE 读操作"""
         self._cancelled = True
+        # 关闭正在读取的源文件句柄，中断阻塞的 FUSE read()
+        handle = getattr(self, "_active_src_handle", None)
+        if handle:
+            try:
+                handle.close()
+            except OSError:
+                pass
 
     def _notify(self):
         """通知进度回调"""
@@ -350,10 +359,11 @@ class SyncEngine:
 
     def _copy_file(self, src_path: str, dst_path: str, size: int) -> FileProgress:
         """
-        带进度回调的文件拷贝
+        双缓冲异步文件拷贝
 
+        使用 reader 线程 + writer 线程通过 queue 传递数据块，
+        使 FUSE 读取和磁盘写入并行执行，充分利用两端带宽。
         先写入 dst_path + ".quark_tmp" 临时文件，完成后 rename 为正式文件。
-        这样可以通过后缀识别不完整的文件。
         """
         fp = FileProgress(
             src=src_path,
@@ -374,54 +384,98 @@ class SyncEngine:
 
         copy_start = time.time()
 
-        try:
-            with open(src_path, "rb") as fsrc, open(tmp_path, "wb") as fdst:
-                copied = 0
-                last_report = copy_start
+        # 双缓冲队列: 最多预读 2 个 chunk，平衡内存占用与流水线效率
+        buf_q: queue.Queue = queue.Queue(maxsize=8)
+        _SENTINEL = object()  # 读取结束哨兵
+        read_error = [None]   # reader 线程异常容器
 
-                while True:
-                    if self._cancelled:
-                        fp.status = "error"
-                        fp.error = "cancelled"
-                        # 取消时清理临时文件
-                        try:
-                            os.remove(tmp_path)
-                        except OSError:
-                            pass
-                        return fp
-
+        def _reader():
+            """后台线程: 从 FUSE/WebDAV 源读取数据块"""
+            try:
+                while not self._cancelled:
                     chunk = fsrc.read(self.buffer_size)
                     if not chunk:
                         break
+                    buf_q.put(chunk)
+            except Exception as e:
+                # 文件句柄被 cancel() 关闭时会抛 ValueError/OSError
+                if not self._cancelled:
+                    read_error[0] = e
+            finally:
+                buf_q.put(_SENTINEL)
 
-                    fdst.write(chunk)
-                    copied += len(chunk)
-                    fp.copied = copied
+        try:
+            fsrc = open(src_path, "rb")
+            self._active_src_handle = fsrc  # 允许 cancel() 中断读取
 
-                    # 计算速度 (每 0.5 秒更新一次)
-                    now = time.time()
-                    elapsed = now - copy_start
-                    if elapsed > 0:
-                        fp.speed = copied / elapsed
+            fdst = open(tmp_path, "wb")
 
-                    # 限制回调频率: 每 0.5 秒或每 32MB
-                    if now - last_report >= 0.5 or copied - (fp.copied - len(chunk)) >= 32 * 1024 * 1024:
-                        # 同步更新整体进度
-                        with self._lock:
-                            self._progress.copied_bytes = (
-                                self._progress.copied_bytes
-                                - (fp.copied - len(chunk))
-                                + fp.copied
-                            )
-                        self._notify()
-                        last_report = now
+            copied = 0
+            last_report = copy_start
 
-                # 确保数据落盘 — 防止 NAS/FUSE 文件系统缓存导致 rename 时找不到文件
-                fdst.flush()
-                os.fsync(fdst.fileno())
+            # 启动 reader 线程
+            reader_t = threading.Thread(
+                target=_reader, daemon=True,
+                name="sync-reader-{}".format(os.path.basename(src_path)[:32]),
+            )
+            reader_t.start()
 
-            # 写入完成 — 将临时文件 rename 为正式文件
-            # rename 是原子操作 (同文件系统), 确保目标文件要么完整要么不存在
+            # 主线程负责写入
+            while True:
+                if self._cancelled:
+                    fp.status = "error"
+                    fp.error = "cancelled"
+                    break
+
+                try:
+                    chunk = buf_q.get(timeout=0.5)
+                except queue.Empty:
+                    continue
+
+                if chunk is _SENTINEL:
+                    break
+
+                fdst.write(chunk)
+                copied += len(chunk)
+                fp.copied = copied
+
+                # 计算速度
+                now = time.time()
+                elapsed = now - copy_start
+                if elapsed > 0:
+                    fp.speed = copied / elapsed
+
+                # 限制回调频率: 每 0.5 秒
+                if now - last_report >= 0.5:
+                    with self._lock:
+                        self._progress.copied_bytes = (
+                            self._progress.copied_bytes
+                            - (fp.copied - len(chunk))
+                            + fp.copied
+                        )
+                    self._notify()
+                    last_report = now
+
+            # 等待 reader 结束
+            reader_t.join(timeout=5)
+            self._active_src_handle = None
+
+            # 检查 reader 是否有异常
+            if read_error[0] is not None:
+                raise read_error[0]
+
+            if fp.status == "cancelled":
+                raise Exception("cancelled")
+
+            # 确保数据落盘
+            fdst.flush()
+            os.fsync(fdst.fileno())
+            fdst.close()
+            fdst = None
+            fsrc.close()
+            fsrc = None
+
+            # rename 为正式文件
             self._safe_rename(tmp_path, dst_path)
 
             # 保留修改时间
@@ -436,9 +490,23 @@ class SyncEngine:
             logger.info("已同步: %s (%s)", fp.filename, _format_size(size))
 
         except Exception as e:
-            fp.status = "error"
-            fp.error = str(e)
-            logger.error("同步失败: %s — %s", fp.filename, e)
+            self._active_src_handle = None
+            if fp.status != "error":
+                fp.status = "error"
+                fp.error = str(e) if str(e) != "cancelled" else "cancelled"
+                if str(e) != "cancelled":
+                    logger.error("同步失败: %s — %s", fp.filename, e)
+            # 关闭文件句柄
+            try:
+                if fsrc and not fsrc.closed:
+                    fsrc.close()
+            except OSError:
+                pass
+            try:
+                if fdst and not fdst.closed:
+                    fdst.close()
+            except OSError:
+                pass
             # 删除不完整的临时文件
             try:
                 if os.path.exists(tmp_path):
