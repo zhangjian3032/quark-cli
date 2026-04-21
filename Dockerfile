@@ -15,6 +15,9 @@ FROM python:3.11-slim
 LABEL maintainer="quark-cli"
 LABEL description="夸克网盘 CLI + Web 管理面板"
 
+# rsync: 用于高性能文件同步 (zero-copy/sendfile)
+RUN apt-get update && apt-get install -y --no-install-recommends rsync && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # 安装 Python 依赖（editable 模式，__file__ 指向 /app/quark_cli/）
