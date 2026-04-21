@@ -398,6 +398,8 @@ class SyncEngine:
         调用系统 rsync 获得 zero-copy / sendfile 级别的拷贝性能。
         先写入 dst_path + ".quark_tmp" 临时文件，完成后 rename 为正式文件。
         通过 --info=progress2 解析实时进度。
+
+        使用独立线程读取 rsync stdout，避免 pipe buffer 满导致 rsync 进程阻塞。
         """
         fp = FileProgress(
             src=src_path,
@@ -419,9 +421,44 @@ class SyncEngine:
         copy_start = time.time()
         proc = None
 
+        # 解析 rsync --info=progress2 的输出
+        # 格式:  1,234,567  25%   12.34MB/s   0:00:05 (xfr#1, to-chk=0/1)
+        progress_re = _re.compile(
+            r"[\s]*([\d,]+)\s+(\d+)%\s+([\d.]+\S+/s)"
+        )
+
+        # 用独立线程读 stdout，防止 pipe buffer 满阻塞 rsync
+        latest_copied = [0]  # 从 reader 线程更新
+
+        def _stdout_reader(stream):
+            """持续读取并丢弃 rsync stdout，仅提取最新已拷贝字节数"""
+            buf = b""
+            try:
+                while True:
+                    data = stream.read(4096)
+                    if not data:
+                        break
+                    buf += data
+                    # 按 \r 或 \n 切分
+                    while b"\r" in buf or b"\n" in buf:
+                        ri = buf.find(b"\r")
+                        ni = buf.find(b"\n")
+                        if ri < 0:
+                            ri = len(buf)
+                        if ni < 0:
+                            ni = len(buf)
+                        idx = min(ri, ni)
+                        line = buf[:idx].decode("utf-8", errors="replace").strip()
+                        buf = buf[idx + 1:]
+                        if not line:
+                            continue
+                        m = progress_re.search(line)
+                        if m:
+                            latest_copied[0] = int(m.group(1).replace(",", ""))
+            except (OSError, ValueError):
+                pass  # 进程被 kill 时 stream 会关闭
+
         try:
-            # rsync 单文件拷贝: -a 保留时间, --info=progress2 输出全局进度行
-            # --no-compress: 本地拷贝不需要压缩
             cmd = [
                 "rsync", "-a", "--no-compress",
                 "--info=progress2", "--no-inc-recursive",
@@ -435,15 +472,17 @@ class SyncEngine:
             )
             self._active_rsync_proc = proc
 
-            # 解析 rsync --info=progress2 的输出
-            # 格式:  1,234,567  25%   12.34MB/s   0:00:05 (xfr#1, to-chk=0/1)
-            progress_re = _re.compile(
-                r"[\s]*([\d,]+)\s+(\d+)%\s+([\d.]+\S+/s)"
+            # 启动 stdout reader 线程 — 持续排空 pipe，rsync 永远不会被阻塞
+            reader_t = threading.Thread(
+                target=_stdout_reader, args=(proc.stdout,),
+                daemon=True,
+                name="rsync-reader",
             )
-            last_report = copy_start
-            buf = b""
+            reader_t.start()
 
-            while True:
+            # 主线程: 定期轮询 latest_copied 更新进度，等待 rsync 结束
+            last_report = copy_start
+            while proc.poll() is None:
                 if self._cancelled:
                     proc.terminate()
                     try:
@@ -455,55 +494,27 @@ class SyncEngine:
                     fp.error = "cancelled"
                     break
 
-                # 非阻塞读: 每次读一小块
-                data = proc.stdout.read(256)
-                if not data:
-                    # 进程输出结束
-                    break
-                buf += data
+                copied = latest_copied[0]
+                if copied > fp.copied:
+                    fp.copied = copied
+                    now = time.time()
+                    elapsed = now - copy_start
+                    if elapsed > 0:
+                        fp.speed = copied / elapsed
 
-                # 按 \r 或 \n 切分进度行
-                while b"\r" in buf or b"\n" in buf:
-                    # 找最早的分隔符
-                    ri = buf.find(b"\r")
-                    ni = buf.find(b"\n")
-                    if ri < 0:
-                        ri = len(buf)
-                    if ni < 0:
-                        ni = len(buf)
-                    idx = min(ri, ni)
-                    line = buf[:idx].decode("utf-8", errors="replace").strip()
-                    buf = buf[idx + 1:]
+                    if now - last_report >= 0.5:
+                        with self._lock:
+                            prev = sum(
+                                f.size for f in self._progress.files
+                                if f.status in ("done", "skipped")
+                            )
+                            self._progress.copied_bytes = prev + fp.copied
+                        self._notify()
+                        last_report = now
 
-                    if not line:
-                        continue
+                time.sleep(0.2)
 
-                    m = progress_re.search(line)
-                    if m:
-                        copied_str = m.group(1).replace(",", "")
-                        copied = int(copied_str)
-                        fp.copied = copied
-
-                        now = time.time()
-                        elapsed = now - copy_start
-                        if elapsed > 0:
-                            fp.speed = copied / elapsed
-
-                        # 限制回调频率: 每 0.5 秒
-                        if now - last_report >= 0.5:
-                            with self._lock:
-                                # 更新总进度
-                                prev = sum(
-                                    f.size for f in self._progress.files
-                                    if f.status in ("done", "skipped")
-                                )
-                                self._progress.copied_bytes = prev + fp.copied
-                            self._notify()
-                            last_report = now
-
-            # 等待进程结束
-            if proc.returncode is None:
-                proc.wait(timeout=30)
+            reader_t.join(timeout=5)
             self._active_rsync_proc = None
 
             if fp.status == "cancelled":
