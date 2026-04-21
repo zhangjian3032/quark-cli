@@ -526,6 +526,8 @@ class SyncEngine:
                         os.remove(fp.src)
                         self._progress.deleted_files += 1
                         logger.info("已删除源: %s", fp.filename)
+                        # 向上逐级清理空目录 (不删源根目录)
+                        self._try_remove_empty_parents(fp.src)
                     except OSError as e:
                         logger.warning("删除源失败: %s — %s", fp.filename, e)
                         self._progress.errors.append(
@@ -565,6 +567,21 @@ class SyncEngine:
         )
 
         return self._progress
+
+    def _try_remove_empty_parents(self, filepath: str):
+        """删除源文件后，向上逐级清理空父目录，直到源根目录为止。"""
+        src_root = str(self.source_dir)
+        parent = os.path.dirname(filepath)
+        while parent and parent != src_root and parent.startswith(src_root):
+            try:
+                if not os.listdir(parent):
+                    os.rmdir(parent)
+                    logger.debug("删除空目录: %s", parent)
+                    parent = os.path.dirname(parent)
+                else:
+                    break  # 目录非空，停止
+            except OSError:
+                break  # 权限或其他错误，停止
 
     def _cleanup_empty_dirs(self):
         """删除源目录中的空子目录 (不删根)"""
