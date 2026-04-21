@@ -396,13 +396,26 @@ class SyncEngine:
                     chunk = fsrc.read(self.buffer_size)
                     if not chunk:
                         break
-                    buf_q.put(chunk)
+                    # 非阻塞入队: cancel 时队列可能已满，避免线程卡死
+                    while not self._cancelled:
+                        try:
+                            buf_q.put(chunk, timeout=0.5)
+                            break
+                        except queue.Full:
+                            continue
             except Exception as e:
                 # 文件句柄被 cancel() 关闭时会抛 ValueError/OSError
                 if not self._cancelled:
                     read_error[0] = e
             finally:
-                buf_q.put(_SENTINEL)
+                # 哨兵也用非阻塞: 防止 writer 已退出导致队列满
+                while True:
+                    try:
+                        buf_q.put(_SENTINEL, timeout=0.5)
+                        break
+                    except queue.Full:
+                        if self._cancelled:
+                            break
 
         try:
             fsrc = open(src_path, "rb")
@@ -456,7 +469,12 @@ class SyncEngine:
                     self._notify()
                     last_report = now
 
-            # 等待 reader 结束
+            # 等待 reader 结束 (先排空队列，防止 reader 卡在 put)
+            while not buf_q.empty():
+                try:
+                    buf_q.get_nowait()
+                except queue.Empty:
+                    break
             reader_t.join(timeout=5)
             self._active_src_handle = None
 
@@ -507,6 +525,16 @@ class SyncEngine:
                     fdst.close()
             except OSError:
                 pass
+            # 排空队列 + 等待 reader 线程退出 (防止线程泄漏)
+            try:
+                while not buf_q.empty():
+                    try:
+                        buf_q.get_nowait()
+                    except queue.Empty:
+                        break
+                reader_t.join(timeout=5)
+            except (NameError, AttributeError):
+                pass  # reader_t 可能未创建
             # 删除不完整的临时文件
             try:
                 if os.path.exists(tmp_path):
