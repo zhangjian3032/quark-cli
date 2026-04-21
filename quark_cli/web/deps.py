@@ -161,3 +161,36 @@ def get_discovery_service(source_name=None):
     if not source:
         return None
     return DiscoveryService(source)
+
+
+# ── 光鸭云盘 ──
+
+_guangya_client_cache = None
+
+
+def _clear_guangya_cache():
+    global _guangya_client_cache
+    _guangya_client_cache = None
+
+
+def get_guangya_client():
+    global _guangya_client_cache
+    if _guangya_client_cache is not None:
+        return _guangya_client_cache
+
+    from quark_cli.guangya_api import GuangyaAPI
+    cfg = get_config()
+    cfg.load()
+    gy = cfg.data.get("guangya", {})
+    did = gy.get("did", "")
+    refresh_token = gy.get("refresh_token", "")
+    if not did and not refresh_token:
+        raise ValueError("未配置光鸭云盘凭证，请在设置页面配置 DID 和 Refresh Token")
+    client = GuangyaAPI(did=did, refresh_token=refresh_token)
+    _guangya_client_cache = client
+    return client
+
+
+def get_guangya_drive_service():
+    from quark_cli.services.guangya_drive_service import GuangyaDriveService
+    return GuangyaDriveService(get_guangya_client())

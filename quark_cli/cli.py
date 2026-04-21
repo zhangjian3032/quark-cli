@@ -50,6 +50,18 @@ def create_parser() -> argparse.ArgumentParser:
   quark-cli bot                                    启动飞书影视转存机器人
   quark-cli bot --app-id <id> --app-secret <key>   指定凭证启动
 
+光鸭云盘:
+  quark-cli guangya config set --refresh-token <TOKEN>              设置凭证
+  quark-cli guangya config show                 查看配置
+  quark-cli guangya account                     查看账号信息
+  quark-cli guangya ls                          列出根目录
+  quark-cli guangya ls --parent-id <ID>         列出子目录
+  quark-cli guangya mkdir <名称>                创建目录
+  quark-cli guangya download <file_id>          获取下载链接
+  quark-cli guangya cloud magnet <磁力链接>     解析磁力
+  quark-cli guangya cloud create <URL>          创建云添加任务
+  quark-cli guangya cloud list                  查看云添加任务
+
 Web 面板:
   quark-cli serve                                  启动 Web 管理面板
   quark-cli serve --port 8080                      自定义端口
@@ -463,6 +475,65 @@ Web 面板:
     rss_hist.add_argument("--limit", type=int, default=20, help="显示条数 (默认 20)")
 
 
+    # ========== guangya (光鸭云盘) ==========
+    guangya_parser = subparsers.add_parser("guangya", help="光鸭云盘 (guangyapan.com)")
+    guangya_sub = guangya_parser.add_subparsers(dest="guangya_action")
+
+    # guangya config
+    gy_config = guangya_sub.add_parser("config", help="凭证配置")
+    gy_config_sub = gy_config.add_subparsers(dest="guangya_config_action")
+
+    gy_cfg_set = gy_config_sub.add_parser("set", help="设置凭证")
+    gy_cfg_set.add_argument("--refresh-token", default=None, help="OIDC Refresh Token")
+
+    gy_config_sub.add_parser("show", help="显示当前配置")
+
+    # guangya account
+    guangya_sub.add_parser("account", help="查看账号信息")
+
+    # guangya ls
+    gy_ls = guangya_sub.add_parser("ls", help="列出目录内容")
+    gy_ls.add_argument("--parent-id", default="", help="父目录 fileId (空=根目录)")
+
+    # guangya mkdir
+    gy_mk = guangya_sub.add_parser("mkdir", help="创建目录")
+    gy_mk.add_argument("dir_name", help="目录名称")
+    gy_mk.add_argument("--parent-id", default="", help="父目录 fileId")
+
+    # guangya rename
+    gy_rn = guangya_sub.add_parser("rename", help="重命名")
+    gy_rn.add_argument("file_id", help="文件 fileId")
+    gy_rn.add_argument("new_name", help="新名称")
+
+    # guangya delete
+    gy_rm = guangya_sub.add_parser("delete", help="删除文件/目录")
+    gy_rm.add_argument("file_id", nargs="+", help="文件 fileId (可多个)")
+
+    # guangya download
+    gy_dl = guangya_sub.add_parser("download", help="获取下载链接")
+    gy_dl.add_argument("file_id", help="文件 fileId")
+
+    # guangya cloud (云添加)
+    gy_cloud = guangya_sub.add_parser("cloud", help="云添加 (磁力/种子)")
+    gy_cloud_sub = gy_cloud.add_subparsers(dest="guangya_cloud_action")
+
+    gy_magnet = gy_cloud_sub.add_parser("magnet", help="解析磁力链接")
+    gy_magnet.add_argument("url", help="磁力链接 URL")
+
+    gy_torrent = gy_cloud_sub.add_parser("torrent", help="解析种子文件")
+    gy_torrent.add_argument("torrent_path", help="种子文件路径")
+
+    gy_create = gy_cloud_sub.add_parser("create", help="创建云添加任务")
+    gy_create.add_argument("url", help="磁力/种子 URL")
+    gy_create.add_argument("--parent-id", default="", help="保存目录 fileId")
+    gy_create.add_argument("--file-indexes", default=None, help="选择文件索引 (逗号分隔)")
+    gy_create.add_argument("--new-name", default=None, help="重命名")
+
+    gy_cloud_sub.add_parser("list", help="查看云添加任务列表")
+
+    gy_cloud_del = gy_cloud_sub.add_parser("delete", help="删除云添加任务")
+    gy_cloud_del.add_argument("task_id", nargs="+", help="任务 ID (可多个)")
+
     # ========== serve (Web 面板) ==========
     serve_parser = subparsers.add_parser("serve", help="启动 Web 管理面板 (FastAPI + React)")
     serve_parser.add_argument("--host", default="0.0.0.0", help="监听地址 (默认 0.0.0.0; Linux 可用 :: 启用 IPv6 双栈)")
@@ -748,7 +819,7 @@ def main():
     # 延迟导入命令处理器
     from quark_cli.commands import config_cmd, account_cmd, share_cmd, drive_cmd, task_cmd, search_cmd
     from quark_cli.commands import media_cmd
-    from quark_cli.commands import sync_cmd, rss_cmd, torrent_cmd
+    from quark_cli.commands import sync_cmd, rss_cmd, torrent_cmd, guangya_cmd
 
     # serve 命令特殊处理 (不通过 handlers dict)
     if args.command == "serve":
@@ -773,6 +844,7 @@ def main():
         "sync": sync_cmd.handle,
         "rss": rss_cmd.handle,
         "torrent": torrent_cmd.handle,
+        "guangya": guangya_cmd.handle,
     }
 
     handler = handlers.get(args.command)

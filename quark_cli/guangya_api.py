@@ -36,7 +36,7 @@ class GuangyaAPI:
     # access_token 提前刷新的安全余量 (秒)
     _TOKEN_REFRESH_MARGIN = 300  # 过期前 5 分钟刷新
 
-    def __init__(self, did: str = "", refresh_token: str = "", token: str = ""):
+    def __init__(self, refresh_token: str = "", token: str = ""):
         """初始化
 
         Args:
@@ -44,7 +44,8 @@ class GuangyaAPI:
             refresh_token: OIDC refresh token (以 "gy." 开头, 长期有效, 推荐)
             token: 直接提供 access_token (2h 有效期, 不推荐, 用于临时测试)
         """
-        self.did = did.strip()
+        import uuid
+        self.did = uuid.uuid4().hex  # 32-char hex 设备标识 (API 不校验)
         self.refresh_token = refresh_token.strip()
         self._access_token = token.strip()
         self._token_expires_at: float = 0  # unix timestamp
@@ -210,27 +211,25 @@ class GuangyaAPI:
     def ls_dir(
         self,
         parent_id: str = "",
-        page: int = 1,
         page_size: int = 50,
         order_by: int = 3,
         sort_type: int = 1,
         file_types: Optional[List[int]] = None,
     ) -> dict:
-        """列出目录文件
+        """列出目录文件 (cursor 分页, 自动翻页)
 
         Args:
             parent_id: 父目录 ID, 空字符串 "" 表示根目录
-            page: 页码 (从 1 开始)
             page_size: 每页数量
             order_by: 排序字段 (3=更新时间)
             sort_type: 排序方向 (1=降序)
             file_types: 文件类型过滤
 
         Returns:
-            {total, list: [{fileId, fileName, fileSize, ...}]}
+            {msg, data: {total, list: [{fileId, fileName, fileSize, ...}]}}
         """
         all_items: List[dict] = []
-        cur_page = page
+        cursor: str = ""
 
         while True:
             payload: Dict[str, Any] = {
@@ -238,8 +237,9 @@ class GuangyaAPI:
                 "pageSize": page_size,
                 "orderBy": order_by,
                 "sortType": sort_type,
-                "page": cur_page,
             }
+            if cursor:
+                payload["cursor"] = cursor
             if file_types is not None:
                 payload["fileTypes"] = file_types
 
@@ -252,9 +252,10 @@ class GuangyaAPI:
             total = data.get("total", 0)
             all_items.extend(items)
 
-            if not items or len(all_items) >= total:
+            next_cursor = data.get("cursor", "")
+            if not items or len(all_items) >= total or not next_cursor:
                 break
-            cur_page += 1
+            cursor = next_cursor
 
         return {
             "msg": "success",

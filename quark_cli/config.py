@@ -32,6 +32,10 @@ DEFAULT_CONFIG = {
         },
     },
     "tasklist": [],
+    "guangya": {
+        "did": "",
+        "refresh_token": "",
+    },
     "torrent_clients": {
         "default": "",
         "qbittorrent": [],
