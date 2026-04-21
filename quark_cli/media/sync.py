@@ -308,6 +308,46 @@ class SyncEngine:
         except OSError:
             return True
 
+    def _safe_rename(self, tmp_path: str, dst_path: str, max_retries: int = 3):
+        """
+        稳健的 rename 操作 — 处理 NAS/FUSE/NFS 文件系统的边界情况。
+
+        某些网络文件系统 (NFS/CIFS/FUSE) 在写入完成后，目录项可能存在短暂的
+        不一致窗口，导致 os.rename() 抛出 ENOENT。本方法通过以下策略解决:
+          1. 确保目标目录存在 (处理并发删除或缓存失效)
+          2. 最多重试 max_retries 次，每次间隔递增
+          3. 若 os.rename() 始终失败，回退到 shutil.move()
+        """
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                # 每次重试前确保目标目录存在
+                os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+                os.rename(tmp_path, dst_path)
+                return
+            except OSError as e:
+                last_err = e
+                if attempt < max_retries - 1:
+                    delay = 0.5 * (attempt + 1)
+                    logger.warning(
+                        "rename 失败 (尝试 %d/%d): %s -> %s — %s, %.1f秒后重试",
+                        attempt + 1, max_retries, tmp_path, dst_path, e, delay
+                    )
+                    time.sleep(delay)
+
+        # os.rename 多次失败 — 回退到 shutil.move (支持跨设备)
+        logger.warning(
+            "rename 重试耗尽，回退到 shutil.move: %s -> %s (最后错误: %s)",
+            tmp_path, dst_path, last_err
+        )
+        try:
+            os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+            shutil.move(tmp_path, dst_path)
+        except Exception as e:
+            raise OSError(
+                f"无法移动临时文件到目标路径: {tmp_path} -> {dst_path}: {e}"
+            ) from e
+
     def _copy_file(self, src_path: str, dst_path: str, size: int) -> FileProgress:
         """
         带进度回调的文件拷贝
@@ -376,9 +416,13 @@ class SyncEngine:
                         self._notify()
                         last_report = now
 
+                # 确保数据落盘 — 防止 NAS/FUSE 文件系统缓存导致 rename 时找不到文件
+                fdst.flush()
+                os.fsync(fdst.fileno())
+
             # 写入完成 — 将临时文件 rename 为正式文件
             # rename 是原子操作 (同文件系统), 确保目标文件要么完整要么不存在
-            os.rename(tmp_path, dst_path)
+            self._safe_rename(tmp_path, dst_path)
 
             # 保留修改时间
             try:
