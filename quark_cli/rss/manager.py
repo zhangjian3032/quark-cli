@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from quark_cli.rss.fetcher import FeedItem, FeedResult, FetchError, fetch_feed
-from quark_cli.rss.matcher import MatchResult, match_items, merge_rule_defaults
+from quark_cli.rss.matcher import MatchResult, match_items, match_items_with_reasons, merge_rule_defaults
 from quark_cli.rss.actions import execute_action
 
 logger = logging.getLogger("quark_cli.rss.manager")
@@ -389,8 +389,9 @@ class RssManager:
             )
             return result
 
-        matches = match_items(items, rules, seen_guids=seen_guids)
+        matches, unmatched_items = match_items_with_reasons(items, rules, seen_guids=seen_guids)
         result["matched"] = len(matches)
+        result["unmatched_items"] = unmatched_items[:50]  # 最多返回 50 条
 
         # 5. 执行动作
         for match in matches:

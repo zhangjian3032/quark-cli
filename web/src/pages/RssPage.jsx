@@ -358,6 +358,21 @@ function RuleModal({ feedId, onClose, onSave }) {
                     当前规则未匹配到任何条目
                   </div>
                 )}
+
+                {preview.unmatched?.length > 0 && (
+                  <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                    <div className="text-[11px] text-gray-500 font-semibold mb-1">未匹配条目 (前 {preview.unmatched.length} 条)</div>
+                    {preview.unmatched.map((item, i) => (
+                      <div key={i} className="flex items-start gap-2 text-xs p-2 bg-orange-500/5 rounded border border-orange-500/10">
+                        <X size={11} className="text-orange-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <span className="truncate block text-gray-400">{item.title}</span>
+                          {item.reason && <span className="text-orange-400/80 text-[11px]">{item.reason}</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -593,6 +608,8 @@ function CheckResultModal({ result, onClose }) {
   const actions = result?.actions || []
   const matched = result?.matched || 0
   const newItems = result?.new_items || 0
+  const unmatchedItems = result?.unmatched_items || []
+  const [showUnmatched, setShowUnmatched] = useState(false)
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -608,7 +625,7 @@ function CheckResultModal({ result, onClose }) {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {/* Stats */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
             <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 text-center">
               <div className="text-xl font-bold text-blue-400">{newItems}</div>
               <div className="text-[10px] text-gray-500">新条目</div>
@@ -623,16 +640,23 @@ function CheckResultModal({ result, onClose }) {
               </div>
               <div className="text-[10px] text-gray-500">成功执行</div>
             </div>
+            <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 text-center">
+              <div className="text-xl font-bold text-orange-400">{unmatchedItems.length}</div>
+              <div className="text-[10px] text-gray-500">未匹配</div>
+            </div>
           </div>
 
           {result?.duration && (
             <div className="text-xs text-gray-500">耗时 {result.duration}s</div>
           )}
 
-          {/* Actions list */}
-          {actions.length > 0 ? (
+          {/* Actions list — matched items */}
+          {actions.length > 0 && (
             <div className="space-y-2">
-              <div className="text-xs text-gray-400 font-semibold">匹配结果</div>
+              <div className="text-xs text-gray-400 font-semibold flex items-center gap-1.5">
+                <CheckCircle size={12} className="text-green-400" />
+                匹配结果 ({actions.length})
+              </div>
               {actions.map((a, i) => (
                 <div key={i} className={`text-sm p-3 rounded-lg border ${
                   a.dry_run ? 'bg-yellow-500/5 border-yellow-500/10' :
@@ -666,15 +690,52 @@ function CheckResultModal({ result, onClose }) {
                 </div>
               ))}
             </div>
-          ) : matched === 0 && newItems > 0 ? (
-            <div className="text-center text-gray-500 text-sm py-4">
-              {newItems} 个新条目，无匹配规则命中
+          )}
+
+          {/* Unmatched items with reasons */}
+          {unmatchedItems.length > 0 && (
+            <div className="space-y-2">
+              <button
+                onClick={() => setShowUnmatched(v => !v)}
+                className="flex items-center gap-1.5 text-xs text-gray-400 font-semibold hover:text-gray-300 transition-colors"
+              >
+                {showUnmatched ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                <Filter size={12} className="text-orange-400" />
+                未匹配条目 ({unmatchedItems.length}) — 点击{showUnmatched ? '收起' : '展开'}原因
+              </button>
+              {showUnmatched && (
+                <div className="space-y-1.5">
+                  {unmatchedItems.map((u, i) => (
+                    <div key={i} className="text-sm p-2.5 rounded-lg border bg-orange-500/5 border-orange-500/10">
+                      <div className="flex items-start gap-2">
+                        <X size={13} className="text-orange-400 flex-shrink-0 mt-0.5" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate text-gray-300" title={u.title}>{u.title}</div>
+                          <div className="text-xs text-orange-400/80 mt-0.5">{u.reason}</div>
+                          {u.reasons_detail && Object.keys(u.reasons_detail).length > 1 && (
+                            <div className="mt-1 space-y-0.5">
+                              {Object.entries(u.reasons_detail).map(([ruleName, reason], j) => (
+                                <div key={j} className="text-[11px] text-gray-500">
+                                  <span className="text-gray-600">{ruleName}:</span> {reason}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          ) : newItems === 0 ? (
+          )}
+
+          {/* Empty states */}
+          {actions.length === 0 && unmatchedItems.length === 0 && newItems === 0 && (
             <div className="text-center text-gray-500 text-sm py-4">
               没有新条目 (可能已去重或 Feed 未更新)
             </div>
-          ) : null}
+          )}
         </div>
 
         <div className="flex justify-end p-4 border-t border-surface-3">

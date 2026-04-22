@@ -371,7 +371,7 @@ def is_magnet_url(url):
     return url.strip().startswith("magnet:")
 
 
-def download_torrent_file(url, auth=None, timeout=30):
+def download_torrent_file(url, auth=None, timeout=30, proxy=None):
     """
     下载 .torrent 文件
 
@@ -396,8 +396,14 @@ def download_torrent_file(url, auth=None, timeout=30):
         if auth.get("headers") and isinstance(auth["headers"], dict):
             headers.update(auth["headers"])
 
-    resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-    resp.raise_for_status()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True, proxies=proxies)
+        resp.raise_for_status()
+    except Exception as e:
+        if not proxy:
+            raise type(e)("服务端直连下载失败: {} (可在配置中添加 proxy.url 并将 torrent 加入 proxy.targets)".format(e))
+        raise
 
     content_type = resp.headers.get("Content-Type", "")
 

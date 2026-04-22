@@ -3,7 +3,7 @@ import {
   Cloud, FolderOpen, FolderPlus, Trash2, Download, Link2, RefreshCw,
   ChevronRight, ArrowLeft, Loader2, Settings, X, Check, Copy,
   Magnet, FileText, Plus, AlertCircle, CheckCircle, HardDrive, Server,
-  FolderSync, StopCircle, Play, Clock
+  FolderSync, StopCircle, Play, Clock, Upload
 } from 'lucide-react'
 
 const API = '/api'
@@ -127,8 +127,11 @@ function CloudAddModal({ onClose, onCreated }) {
   const [resolved, setResolved] = useState(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef(null)
 
   const isMagnet = url.trim().startsWith('magnet:')
+  const isTorrentUrl = !isMagnet && url.trim().length > 0
 
   const doResolve = async () => {
     setResolving(true); setError(''); setResolved(null)
@@ -142,6 +145,34 @@ function CloudAddModal({ onClose, onCreated }) {
       setResolved(await resp.json())
     } catch (e) { setError(e.message) }
     finally { setResolving(false) }
+  }
+
+  const doUploadTorrent = async (file) => {
+    if (!file) return
+    setUploading(true); setError(''); setResolved(null)
+    try {
+      // 读取文件并 base64 编码
+      const buf = await file.arrayBuffer()
+      const bytes = new Uint8Array(buf)
+      let binary = ''
+      for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+      const b64 = btoa(binary)
+
+      const resp = await fetch(`${API}/guangya/cloud/upload-torrent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_base64: b64 }),
+      })
+      if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || '上传解析失败') }
+      setResolved(await resp.json())
+      if (!url.trim()) setUrl(file.name)
+    } catch (e) { setError(e.message) }
+    finally { setUploading(false) }
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file) doUploadTorrent(file)
   }
 
   const doCreate = async () => {
@@ -167,6 +198,7 @@ function CloudAddModal({ onClose, onCreated }) {
 
   const btInfo = resolved?.btResInfo || {}
   const subfiles = btInfo.subfiles || []
+  const resolveFailedForTorrentUrl = !resolved && error && isTorrentUrl && !resolving
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -182,14 +214,52 @@ function CloudAddModal({ onClose, onCreated }) {
             <input value={url} onChange={e => setUrl(e.target.value)} placeholder="magnet:?xt=... 或 https://...xxx.torrent"
               className="w-full px-3 py-2 bg-surface-2 border border-surface-3 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
           </label>
+          <label className="block">
+            <span className="text-xs text-gray-400 mb-1 block">保存目录 ID <span className="text-gray-600">(留空 = 根目录)</span></span>
+            <input value={parentId} onChange={e => setParentId(e.target.value)} placeholder="留空保存到根目录"
+              className="w-full px-3 py-2 bg-surface-2 border border-surface-3 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+          </label>
+
           {!resolved && (
-            <button onClick={doResolve} disabled={resolving || !url.trim()}
-              className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm disabled:opacity-50">
-              {resolving ? <Loader2 size={14} className="animate-spin" /> : <Magnet size={14} />}
-              解析
-            </button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={doResolve} disabled={resolving || !url.trim()}
+                className="flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-500 rounded-lg text-sm disabled:opacity-50">
+                {resolving ? <Loader2 size={14} className="animate-spin" /> : <Magnet size={14} />}
+                解析链接
+              </button>
+              <span className="text-xs text-gray-600">或</span>
+              <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                className="flex items-center gap-2 px-4 py-2 bg-surface-2 hover:bg-surface-3 border border-surface-3 rounded-lg text-sm disabled:opacity-50">
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                上传 .torrent
+              </button>
+              <input ref={fileInputRef} type="file" accept=".torrent" onChange={handleFileSelect} className="hidden" />
+            </div>
           )}
-          {error && <div className="flex items-center gap-2 text-red-400 text-sm p-3 bg-red-500/10 rounded-lg"><AlertCircle size={16} />{error}</div>}
+
+          {error && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-red-400 text-sm p-3 bg-red-500/10 rounded-lg">
+                <AlertCircle size={16} />{error}
+              </div>
+              {resolveFailedForTorrentUrl && (
+                <div className="flex items-center gap-2 p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg">
+                  <AlertCircle size={14} className="text-yellow-400 flex-shrink-0" />
+                  <div className="flex-1">
+                    <div className="text-xs text-yellow-400 font-semibold">服务端无法下载该种子链接</div>
+                    <div className="text-xs text-gray-400 mt-0.5">可配置代理 (proxy.targets 加入 torrent) 或下载 .torrent 文件后上传</div>
+                  </div>
+                  <button onClick={() => fileInputRef.current?.click()} disabled={uploading}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-xs font-semibold disabled:opacity-50 flex-shrink-0">
+                    {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                    上传文件
+                  </button>
+                  <input ref={fileInputRef} type="file" accept=".torrent" onChange={handleFileSelect} className="hidden" />
+                </div>
+              )}
+            </div>
+          )}
+
           {resolved && (
             <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 space-y-2">
               <div className="font-medium text-sm">{btInfo.fileName || '未知'}</div>
@@ -204,11 +274,15 @@ function CloudAddModal({ onClose, onCreated }) {
                   ))}
                 </div>
               )}
-              <button onClick={doCreate} disabled={creating}
-                className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm disabled:opacity-50 mt-2">
-                {creating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
-                创建任务
-              </button>
+              <div className="flex items-center gap-2 mt-2">
+                <button onClick={doCreate} disabled={creating}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-500 rounded-lg text-sm disabled:opacity-50">
+                  {creating ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  创建任务
+                </button>
+                <button onClick={() => { setResolved(null); setError('') }}
+                  className="px-3 py-2 text-xs text-gray-400 hover:text-gray-300">重新解析</button>
+              </div>
             </div>
           )}
         </div>

@@ -160,9 +160,15 @@ def _action_torrent(match_result, config_path):
         get_torrent_client, download_torrent_file,
         is_magnet_url, is_torrent_url,
     )
+    from quark_cli.config import ConfigManager, get_proxy_for
 
     rule = match_result.rule
     item = match_result.item
+
+    # 获取代理
+    _cfg = ConfigManager(config_path)
+    _cfg.load()
+    proxy = get_proxy_for(_cfg.data, "torrent") or get_proxy_for(_cfg.data, "rss")
 
     # 1. 获取 qBittorrent 客户端
     client_id = rule.get("torrent_client", "")
@@ -201,7 +207,7 @@ def _action_torrent(match_result, config_path):
             # .torrent URL → 先下载文件再上传 (更可靠, 支持 PT 站认证)
             auth = _get_feed_auth(match_result, config_path)
             try:
-                torrent_bytes, filename = download_torrent_file(link, auth=auth)
+                torrent_bytes, filename = download_torrent_file(link, auth=auth, proxy=proxy)
                 result = qb.add_torrent_file(
                     torrent_bytes, filename,
                     save_path=save_path,
@@ -306,6 +312,8 @@ def _action_guangya(match_result, config_path):
     # 1. 获取光鸭客户端
     cfg = ConfigManager(config_path)
     cfg.load()
+    from quark_cli.config import get_proxy_for
+    proxy = get_proxy_for(cfg.data, "torrent") or get_proxy_for(cfg.data, "rss")
     gy_cfg = cfg.data.get("guangya", {})
     refresh_token = gy_cfg.get("refresh_token", "")
     if not refresh_token:
@@ -355,7 +363,33 @@ def _action_guangya(match_result, config_path):
         elif is_torrent_url(link) or _is_torrent_enclosure(match_result, link):
             # 种子 URL → 下载 → 上传解析 → 创建任务
             auth = _get_feed_auth(match_result, config_path)
-            torrent_bytes, filename = download_torrent_file(link, auth=auth)
+            try:
+                torrent_bytes, filename = download_torrent_file(link, auth=auth, proxy=proxy)
+            except Exception as dl_err:
+                logger.warning('种子下载失败 [%s]: %s, 尝试云端解析', link[:80], dl_err)
+                # Fallback: 尝试让光鸭云端直接解析 URL (某些公开种子可行)
+                resolve_data = client.resolve_magnet(link)
+                if resolve_data:
+                    bt_info = resolve_data.get('btResInfo', {})
+                    subfiles = bt_info.get('subfiles', [])
+                    file_indexes = list(range(len(subfiles))) if subfiles else None
+                    magnet_url = resolve_data.get('url', '') or link
+                    task = client.create_cloud_task(
+                        url=magnet_url, parent_id=parent_id, file_indexes=file_indexes,
+                    )
+                    if task:
+                        return {
+                            'success': True,
+                            'method': 'torrent_cloud_fallback',
+                            'url': link[:120],
+                            'task_id': task.get('taskId', ''),
+                            'file_name': bt_info.get('fileName', item.title),
+                        }
+                return {
+                    'success': False,
+                    'error': '种子下载失败且云端无法解析: {} (可通过 WebUI 手动上传 .torrent)'.format(str(dl_err)[:80]),
+                    'url': link[:120],
+                }
 
             # 保存到临时文件供 API 上传
             tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)

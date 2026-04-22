@@ -197,6 +197,143 @@ def match_item(item, rule):
     return MatchResult(item=item, rule=rule, links=links, matched_by=matched_by)
 
 
+def match_item_with_reason(item, rule):
+    """
+    判断单个 FeedItem 是否匹配规则, 并返回不匹配原因.
+
+    Returns:
+        (MatchResult, "") 匹配成功
+        (None, reason_str) 不匹配, 附带原因
+    """
+    rule = merge_rule_defaults(rule)
+
+    if not rule.get("enabled", True):
+        return None, "规则已禁用"
+
+    title = item.title or ""
+    full_text = "{} {}".format(title, item.description or "")
+
+    # 1. 排除正则
+    exclude = rule.get("exclude", "")
+    if exclude:
+        try:
+            if re.search(exclude, title, re.IGNORECASE):
+                return None, "被排除正则 /{0}/ 命中".format(exclude)
+        except re.error:
+            return None, "排除正则 /{0}/ 语法错误".format(exclude)
+
+    # 2. 匹配正则
+    match_pattern = rule.get("match", "")
+    if match_pattern:
+        try:
+            if not re.search(match_pattern, title, re.IGNORECASE):
+                return None, "标题不匹配正则 /{0}/".format(match_pattern)
+        except re.error:
+            return None, "匹配正则 /{0}/ 语法错误".format(match_pattern)
+
+    # 3. 画质过滤
+    quality = rule.get("quality", "")
+    if quality:
+        try:
+            if not re.search(quality, title, re.IGNORECASE):
+                return None, "画质不匹配 /{0}/".format(quality)
+        except re.error:
+            pass
+
+    # 4. 大小过滤
+    min_gb = float(rule.get("min_size_gb", 0) or 0)
+    max_gb = float(rule.get("max_size_gb", 0) or 0)
+    if min_gb > 0 or max_gb > 0:
+        size = _parse_size_gb(full_text)
+        if size is None and item.enclosures:
+            for enc in item.enclosures:
+                length = enc.get("length", 0)
+                if length and length > 0:
+                    size = length / (1024 * 1024 * 1024)
+                    break
+        if size is not None:
+            if min_gb > 0 and size < min_gb:
+                return None, "文件太小 ({0:.2f}GB < {1}GB)".format(size, min_gb)
+            if max_gb > 0 and size > max_gb:
+                return None, "文件太大 ({0:.2f}GB > {1}GB)".format(size, max_gb)
+
+    # 5. 提取链接
+    links = extract_links(item)
+
+    # 6. 检查是否有目标类型的链接
+    link_type = rule.get("link_type", "quark")
+    if link_type != "any":
+        if not links.get(link_type):
+            if rule.get("action") in ("auto_save", "torrent", "guangya"):
+                return None, "未找到 {0} 类型链接".format(link_type)
+
+    matched_by = "rule:{}".format(rule.get("name", "unnamed"))
+    if match_pattern:
+        matched_by += " match:{}".format(match_pattern)
+
+    return MatchResult(item=item, rule=rule, links=links, matched_by=matched_by), ""
+
+
+def match_items_with_reasons(items, rules, seen_guids=None):
+    """
+    批量匹配并收集不匹配原因.
+
+    Returns:
+        (matched_list, unmatched_list)
+        matched_list: list[MatchResult]
+        unmatched_list: list[dict] = [{item: FeedItem, reasons: {rule_name: reason}}]
+    """
+    if seen_guids is None:
+        seen_guids = set()
+
+    matched = []
+    unmatched = []
+
+    for item in items:
+        if not item.guid:
+            continue
+        if item.guid in seen_guids:
+            continue
+
+        item_matched = False
+        item_reasons = {}
+
+        for rule in rules:
+            result, reason = match_item_with_reason(item, rule)
+            if result:
+                matched.append(result)
+                item_matched = True
+                break
+            else:
+                rule_name = rule.get("name", "") or rule.get("match", "") or "unnamed"
+                item_reasons[rule_name] = reason
+
+        if not item_matched:
+            # Pick the most informative reason
+            if len(item_reasons) == 0:
+                summary_reason = "无匹配规则"
+            elif len(item_reasons) == 1:
+                summary_reason = list(item_reasons.values())[0]
+            else:
+                # All same reason? Merge
+                unique_reasons = set(item_reasons.values())
+                if len(unique_reasons) == 1:
+                    summary_reason = list(unique_reasons)[0]
+                else:
+                    summary_reason = "; ".join(
+                        "{}: {}".format(k, v) for k, v in item_reasons.items()
+                    )
+            unmatched.append({
+                "title": item.title,
+                "guid": item.guid,
+                "pub_date": item.pub_date.isoformat() if item.pub_date else None,
+                "reason": summary_reason,
+                "reasons_detail": item_reasons,
+            })
+
+    return matched, unmatched
+
+
 def match_items(items, rules, seen_guids=None):
     """
     批量匹配: 对 items 列表逐个应用 rules.

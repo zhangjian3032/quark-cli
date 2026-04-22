@@ -182,7 +182,7 @@ class SyncManager:
                 task.finished_at = time.time()
                 return
 
-            root_name = tree["name"]
+            root_name = tree.get("fileName", tree.get("name", "unknown"))
             task.file_name = root_name
 
             # 收集扁平化的文件列表 和 目录列表

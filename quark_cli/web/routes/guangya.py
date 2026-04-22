@@ -328,7 +328,7 @@ def guangya_resolve_torrent(data: dict = Body(...)):
 
 @router.post("/guangya/cloud/resolve-torrent-url")
 def guangya_resolve_torrent_url(data: dict = Body(...)):
-    """下载远程 .torrent 文件并解析 (RSS/Web 场景)"""
+    """下载远程 .torrent 文件并解析 (RSS/Web 场景), 支持代理"""
     url = data.get("url", "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="缺少 url 参数")
@@ -336,15 +336,21 @@ def guangya_resolve_torrent_url(data: dict = Body(...)):
         import tempfile, os
         from quark_cli.rss.torrent_client import download_torrent_file
         from quark_cli.web.deps import get_guangya_client
+        from quark_cli.config import ConfigManager, get_proxy_for
 
         client = get_guangya_client()
         if not client:
             raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证")
 
+        # 获取代理配置
+        cfg = ConfigManager()
+        cfg.load()
+        proxy = get_proxy_for(cfg.data, "torrent") or get_proxy_for(cfg.data, "rss")
+
         auth = {}
         if data.get("cookie"):
             auth["cookie"] = data["cookie"]
-        torrent_bytes, filename = download_torrent_file(url, auth=auth)
+        torrent_bytes, filename = download_torrent_file(url, auth=auth, proxy=proxy)
 
         tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
         try:
@@ -356,6 +362,56 @@ def guangya_resolve_torrent_url(data: dict = Body(...)):
 
         if not resolve_data:
             raise HTTPException(status_code=400, detail="种子解析失败")
+
+        return resolve_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/guangya/cloud/upload-torrent")
+def guangya_upload_torrent(data: dict = Body(...)):
+    """本地上传 .torrent 文件并解析 — torrent URL 不可达时的 fallback
+
+    前端将 .torrent 文件 base64 编码后通过 JSON 上传:
+      {"filename": "xxx.torrent", "content_base64": "..."}
+    服务端解码 → 保存临时文件 → 调用光鸭 resolve_torrent → 返回解析结果.
+    """
+    import tempfile, os, base64
+
+    content_b64 = data.get("content_base64", "").strip()
+    if not content_b64:
+        raise HTTPException(status_code=400, detail="缺少 content_base64 参数")
+
+    try:
+        content = base64.b64decode(content_b64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="base64 解码失败")
+
+    if len(content) < 20:
+        raise HTTPException(status_code=400, detail="文件内容过小，不是有效的 .torrent 文件")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="文件过大 (>10MB)")
+
+    try:
+        from quark_cli.web.deps import get_guangya_client
+        client = get_guangya_client()
+        if not client:
+            raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证")
+
+        # 写入临时文件
+        filename = data.get("filename", "upload.torrent")
+        tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+        try:
+            tmp.write(content)
+            tmp.close()
+            resolve_data = client.resolve_torrent(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+        if not resolve_data:
+            raise HTTPException(status_code=400, detail="种子文件解析失败")
 
         return resolve_data
     except HTTPException:

@@ -22,3 +22,6 @@ dist-patches/
 apply-patch-0058.py
 integrate-rss.py
 patches-out/
+rss-optimize.txt
+rss-unmatch-reason.txt
+rss-optimize.txt

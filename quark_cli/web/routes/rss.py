@@ -155,51 +155,45 @@ def remove_rule(feed_id: str, index: int):
 
 @router.post("/rss/feeds/{feed_id}/match-preview")
 def match_preview(feed_id: str, data: dict = Body(default={})):
-    """预览规则匹配结果 — 对 Feed 当前条目运行规则，返回匹配/未匹配列表"""
+    """预览规则匹配结果 — 对 Feed 当前条目运行规则，返回匹配/未匹配列表+不匹配原因"""
+    from quark_cli.rss.matcher import match_item_with_reason, merge_rule_defaults
+    from quark_cli.rss.fetcher import FeedItem, extract_links
+
     manager = _get_manager()
     feed = manager.get_feed(feed_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed 不存在")
 
-    # 拉取 feed 条目
-    test_result = manager.test_feed(feed["feed_url"], auth=feed.get("auth"), max_items=50)
+    # 拉取 Feed
+    test_result = manager.test_feed(feed["feed_url"], auth=feed.get("auth"), max_items=100)
     if test_result.get("error"):
         raise HTTPException(status_code=400, detail=test_result["error"])
 
     items_raw = test_result.get("items", [])
-
-    # 构建 FeedItem 对象
-    from quark_cli.rss.fetcher import FeedItem
-    from quark_cli.rss.matcher import match_item, merge_rule_defaults
-    from datetime import datetime
-
-    rule = merge_rule_defaults(data.get("rule", {}))
+    rule = merge_rule_defaults(data.get("rule", data))
 
     matched = []
     unmatched = []
-    for item_dict in items_raw:
-        fi = FeedItem(
-            title=item_dict.get("title", ""),
-            link=item_dict.get("link", ""),
-            guid=item_dict.get("guid", ""),
-            pub_date=None,
-            description=item_dict.get("description", ""),
-            author=item_dict.get("author", ""),
-            categories=item_dict.get("categories", []),
-            enclosures=item_dict.get("enclosures", []),
+    for it in items_raw:
+        item = FeedItem(
+            guid=it.get("guid", ""),
+            title=it.get("title", ""),
+            link=it.get("link", ""),
+            description=it.get("description", ""),
+            enclosures=it.get("enclosures", []),
         )
-        result = match_item(fi, rule)
+        result, reason = match_item_with_reason(item, rule)
         entry = {
-            "title": fi.title,
-            "link": fi.link,
-            "guid": fi.guid,
-            "pub_date": item_dict.get("pub_date"),
-            "description": (fi.description or "")[:200],
+            "title": item.title,
+            "guid": item.guid,
+            "link": item.link,
+            "pub_date": it.get("pub_date"),
         }
         if result:
-            entry["target_links"] = result.get_target_links()
+            entry["target_links"] = result.get_target_links()[:3]
             matched.append(entry)
         else:
+            entry["reason"] = reason
             unmatched.append(entry)
 
     return {
@@ -207,11 +201,8 @@ def match_preview(feed_id: str, data: dict = Body(default={})):
         "matched_count": len(matched),
         "unmatched_count": len(unmatched),
         "matched": matched,
-        "unmatched": unmatched[:20],  # 未匹配只返回前20条
+        "unmatched": unmatched[:20],
     }
-
-
-# ── 测试任意 URL ──
 
 @router.post("/rss/test")
 def test_feed_url(data: dict = Body(...)):
