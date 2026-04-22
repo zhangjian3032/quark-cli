@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Cloud, FolderOpen, FolderPlus, Trash2, Download, Link2, RefreshCw,
   ChevronRight, ArrowLeft, Loader2, Settings, X, Check, Copy,
-  Magnet, FileText, Plus, AlertCircle, CheckCircle, HardDrive, Server
+  Magnet, FileText, Plus, AlertCircle, CheckCircle, HardDrive, Server,
+  FolderSync, StopCircle, Play, Clock
 } from 'lucide-react'
 
 const API = '/api'
@@ -22,6 +23,18 @@ function StatusBadge({ status }) {
     1: ['下载中', 'bg-blue-500/20 text-blue-400 animate-pulse'],
     2: ['已完成', 'bg-green-500/20 text-green-400'],
     3: ['失败', 'bg-red-500/20 text-red-400'],
+  }
+  const [label, cls] = map[status] || ['未知', 'bg-gray-500/20 text-gray-400']
+  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${cls}`}>{label}</span>
+}
+
+function SyncStatusBadge({ status }) {
+  const map = {
+    pending: ['扫描中', 'bg-yellow-500/20 text-yellow-400 animate-pulse'],
+    running: ['同步中', 'bg-blue-500/20 text-blue-400 animate-pulse'],
+    done: ['完成', 'bg-green-500/20 text-green-400'],
+    failed: ['失败', 'bg-red-500/20 text-red-400'],
+    cancelled: ['已取消', 'bg-gray-500/20 text-gray-400'],
   }
   const [label, cls] = map[status] || ['未知', 'bg-gray-500/20 text-gray-400']
   return <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${cls}`}>{label}</span>
@@ -89,7 +102,7 @@ function ConfigModal({ config, onClose, onSave }) {
               className="w-full px-3 py-2 bg-surface-2 border border-surface-3 rounded-lg text-sm focus:outline-none focus:border-brand-500"
             />
             <div className="text-[10px] text-gray-600 mt-1">
-              "下载到服务器" 时的默认保存路径
+              Sync / 下载到服务器时的默认保存路径
             </div>
           </div>
         </div>
@@ -121,10 +134,9 @@ function CloudAddModal({ onClose, onCreated }) {
     setResolving(true); setError(''); setResolved(null)
     try {
       const endpoint = isMagnet ? `${API}/guangya/cloud/resolve-magnet` : `${API}/guangya/cloud/resolve-torrent-url`
-      const body = isMagnet ? { url: url.trim() } : { url: url.trim() }
       const resp = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ url: url.trim() }),
       })
       if (!resp.ok) { const e = await resp.json().catch(() => ({})); throw new Error(e.detail || '解析失败') }
       setResolved(await resp.json())
@@ -205,9 +217,115 @@ function CloudAddModal({ onClose, onCreated }) {
   )
 }
 
+// ── Sync 进度卡片 ──
+function SyncTaskCard({ task, onCancel, onRemove }) {
+  const pct = task.progress || 0
+  const isActive = task.status === 'running' || task.status === 'pending'
+  const logRef = useRef(null)
+
+  useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [task.log])
+
+  return (
+    <div className="bg-surface-2 border border-surface-3 rounded-lg p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <FolderSync size={16} className={`flex-shrink-0 ${isActive ? 'text-blue-400 animate-pulse' : 'text-gray-400'}`} />
+          <span className="text-sm font-medium truncate">{task.file_name || task.file_id}</span>
+          <SyncStatusBadge status={task.status} />
+        </div>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {isActive && (
+            <button onClick={() => onCancel(task.task_id)}
+              className="p-1.5 rounded hover:bg-red-500/10 text-red-400/60 hover:text-red-400" title="取消">
+              <StopCircle size={14} />
+            </button>
+          )}
+          {!isActive && (
+            <button onClick={() => onRemove(task.task_id)}
+              className="p-1.5 rounded hover:bg-surface-3 text-gray-500 hover:text-gray-300" title="删除记录">
+              <Trash2 size={14} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      <div>
+        <div className="flex items-center justify-between text-[10px] text-gray-500 mb-1">
+          <span>{task.done_bytes_fmt} / {task.total_bytes_fmt}</span>
+          <span>{pct.toFixed(1)}%</span>
+        </div>
+        <div className="w-full h-1.5 bg-surface-3 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-300 ${
+              task.status === 'done' ? 'bg-green-500' :
+              task.status === 'failed' ? 'bg-red-500' :
+              task.status === 'cancelled' ? 'bg-gray-500' : 'bg-blue-500'
+            }`}
+            style={{ width: `${Math.min(pct, 100)}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+        <div>
+          <span className="text-gray-500">文件:</span>{' '}
+          <span className="text-gray-300">{task.done_files}/{task.total_files}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">目录:</span>{' '}
+          <span className="text-gray-300">{task.done_dirs}/{task.total_dirs}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">跳过:</span>{' '}
+          <span className="text-gray-300">{task.skipped_files}</span>
+          {task.failed_files > 0 && <span className="text-red-400 ml-1">失败:{task.failed_files}</span>}
+        </div>
+        <div>
+          <span className="text-gray-500">速度:</span>{' '}
+          <span className="text-gray-300">{task.speed_fmt || '-'}</span>
+        </div>
+      </div>
+
+      {/* Current file */}
+      {isActive && task.current_file && (
+        <div className="text-[10px] text-gray-500 truncate">
+          ↳ {task.current_file}
+        </div>
+      )}
+
+      {/* Log (collapsible) */}
+      {task.log && task.log.length > 0 && (
+        <details className="text-[10px]">
+          <summary className="text-gray-500 cursor-pointer hover:text-gray-300">日志 ({task.log.length})</summary>
+          <div ref={logRef} className="mt-1 max-h-32 overflow-y-auto bg-black/30 rounded p-2 font-mono text-gray-400 space-y-0.5">
+            {task.log.map((line, i) => <div key={i}>{line}</div>)}
+          </div>
+        </details>
+      )}
+
+      {/* Error */}
+      {task.error && (
+        <div className="text-xs text-red-400 bg-red-500/10 rounded p-2">{task.error}</div>
+      )}
+
+      {/* Elapsed */}
+      {task.elapsed > 0 && !isActive && (
+        <div className="text-[10px] text-gray-500 flex items-center gap-1">
+          <Clock size={10} /> 耗时 {task.elapsed.toFixed(1)}s
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 主页面 ──
 export default function GuangyaPage() {
-  const [tab, setTab] = useState('files') // files | tasks
+  const [tab, setTab] = useState('files') // files | tasks | sync
   const [config, setConfig] = useState(null)
   const [space, setSpace] = useState(null)
   const [showConfig, setShowConfig] = useState(false)
@@ -223,8 +341,12 @@ export default function GuangyaPage() {
   const [tasks, setTasks] = useState([])
   const [tasksLoading, setTasksLoading] = useState(true)
 
+  // Sync 任务
+  const [syncTasks, setSyncTasks] = useState([])
+  const [syncLoading, setSyncLoading] = useState(false)
+
   // 服务器下载状态
-  const [downloading, setDownloading] = useState(new Set()) // fileId set
+  const [downloading, setDownloading] = useState(new Set())
 
   const parentId = path.length > 0 ? path[path.length - 1].id : ''
 
@@ -266,6 +388,16 @@ export default function GuangyaPage() {
     finally { setTasksLoading(false) }
   }, [])
 
+  const fetchSyncTasks = useCallback(async () => {
+    try {
+      const resp = await fetch(`${API}/guangya/sync/list`)
+      if (resp.ok) {
+        const data = await resp.json()
+        setSyncTasks(data.tasks || [])
+      }
+    } catch { /* ignore */ }
+  }, [])
+
   useEffect(() => { fetchConfig(); fetchSpace() }, [])
   useEffect(() => { if (tab === 'files') fetchFiles() }, [tab, fetchFiles])
   useEffect(() => {
@@ -275,6 +407,15 @@ export default function GuangyaPage() {
       return () => clearInterval(timer)
     }
   }, [tab, fetchTasks])
+  useEffect(() => {
+    if (tab === 'sync') {
+      fetchSyncTasks()
+      const hasActive = syncTasks.some(t => t.status === 'running' || t.status === 'pending')
+      const interval = hasActive ? 1000 : 5000
+      const timer = setInterval(fetchSyncTasks, interval)
+      return () => clearInterval(timer)
+    }
+  }, [tab, fetchSyncTasks, syncTasks])
 
   const navigateTo = (fileId, fileName) => {
     setPath(p => [...p, { id: fileId, name: fileName }])
@@ -343,6 +484,44 @@ export default function GuangyaPage() {
     }
   }
 
+  const handleSync = async (fileId, fileName) => {
+    try {
+      const resp = await fetch(`${API}/guangya/sync/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_id: fileId }),
+      })
+      if (!resp.ok) {
+        const e = await resp.json().catch(() => ({}))
+        throw new Error(e.detail || '创建 Sync 任务失败')
+      }
+      setTab('sync')
+      fetchSyncTasks()
+    } catch (e) {
+      alert(`❌ ${e.message}`)
+    }
+  }
+
+  const handleSyncCancel = async (taskId) => {
+    try {
+      await fetch(`${API}/guangya/sync/cancel`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId }),
+      })
+      fetchSyncTasks()
+    } catch (e) { alert(e.message) }
+  }
+
+  const handleSyncRemove = async (taskId) => {
+    try {
+      await fetch(`${API}/guangya/sync/remove`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: taskId }),
+      })
+      fetchSyncTasks()
+    } catch (e) { alert(e.message) }
+  }
+
   const handleDeleteTasks = async (taskIds) => {
     if (!confirm(`确认删除 ${taskIds.length} 个任务?`)) return
     try {
@@ -365,7 +544,7 @@ export default function GuangyaPage() {
             <Cloud className="text-cyan-400" size={24} />
             光鸭云盘
           </h1>
-          <p className="text-sm text-gray-500 mt-1">guangyapan.com · 文件管理 & 云添加</p>
+          <p className="text-sm text-gray-500 mt-1">guangyapan.com · 文件管理 & 云添加 & Sync</p>
         </div>
         <div className="flex items-center gap-2">
           {space && (
@@ -397,10 +576,17 @@ export default function GuangyaPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 bg-surface-2 rounded-lg p-1 w-fit">
-        {[['files', '文件管理', FolderOpen], ['tasks', '云添加任务', Cloud]].map(([key, label, Icon]) => (
+        {[
+          ['files', '文件管理', FolderOpen],
+          ['sync', 'Sync 任务', FolderSync],
+          ['tasks', '云添加任务', Cloud],
+        ].map(([key, label, Icon]) => (
           <button key={key} onClick={() => setTab(key)}
             className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm transition ${tab === key ? 'bg-surface-1 text-white shadow' : 'text-gray-400 hover:text-white'}`}>
             <Icon size={16} />{label}
+            {key === 'sync' && syncTasks.some(t => t.status === 'running' || t.status === 'pending') && (
+              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            )}
           </button>
         ))}
       </div>
@@ -410,7 +596,6 @@ export default function GuangyaPage() {
         <div className="bg-surface-1 border border-surface-3 rounded-xl">
           {/* Toolbar */}
           <div className="flex items-center gap-2 p-3 border-b border-surface-3">
-            {/* Breadcrumb */}
             <div className="flex items-center gap-1 text-sm flex-1 min-w-0 overflow-x-auto">
               <button onClick={() => { setPath([]); setSelected(new Set()) }}
                 className="text-gray-400 hover:text-white flex-shrink-0">根目录</button>
@@ -460,24 +645,50 @@ export default function GuangyaPage() {
                   <span className="text-sm truncate flex-1">{f.fileName}</span>
                   <span className="text-xs text-gray-500 flex-shrink-0">{f.size_fmt}</span>
                 </div>
-                {!f.is_dir && (
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => handleDownloadToServer(f.fileId, f.fileName)}
-                      disabled={downloading.has(f.fileId)}
-                      className="p-1.5 rounded hover:bg-green-500/10 group" title="下载到服务器">
-                      {downloading.has(f.fileId)
-                        ? <Loader2 size={14} className="text-green-400 animate-spin" />
-                        : <Server size={14} className="text-green-400/60 group-hover:text-green-400" />}
-                    </button>
-                    <button onClick={() => handleDownload(f.fileId)}
-                      className="p-1.5 rounded hover:bg-surface-3" title="浏览器下载">
-                      <Download size={14} className="text-gray-400" />
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-1">
+                  {/* Sync 按钮 — 目录和文件都支持 */}
+                  <button onClick={() => handleSync(f.fileId, f.fileName)}
+                    className="p-1.5 rounded hover:bg-blue-500/10 group" title="Sync 到服务器">
+                    <FolderSync size={14} className="text-blue-400/60 group-hover:text-blue-400" />
+                  </button>
+                  {!f.is_dir && (
+                    <>
+                      <button onClick={() => handleDownloadToServer(f.fileId, f.fileName)}
+                        disabled={downloading.has(f.fileId)}
+                        className="p-1.5 rounded hover:bg-green-500/10 group" title="下载到服务器">
+                        {downloading.has(f.fileId)
+                          ? <Loader2 size={14} className="text-green-400 animate-spin" />
+                          : <Server size={14} className="text-green-400/60 group-hover:text-green-400" />}
+                      </button>
+                      <button onClick={() => handleDownload(f.fileId)}
+                        className="p-1.5 rounded hover:bg-surface-3" title="浏览器下载">
+                        <Download size={14} className="text-gray-400" />
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Sync Tab */}
+      {tab === 'sync' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-gray-300">Sync 任务 ({syncTasks.length})</span>
+            <button onClick={fetchSyncTasks} className="p-2 rounded-lg hover:bg-surface-2">
+              <RefreshCw size={16} className={syncLoading ? 'animate-spin' : ''} />
+            </button>
+          </div>
+          {syncTasks.length === 0 ? (
+            <div className="bg-surface-1 border border-surface-3 rounded-xl p-8 text-center text-gray-500 text-sm">
+              暂无 Sync 任务 — 在文件管理中点击 <FolderSync size={14} className="inline text-blue-400" /> 按钮开始
+            </div>
+          ) : syncTasks.map(t => (
+            <SyncTaskCard key={t.task_id} task={t} onCancel={handleSyncCancel} onRemove={handleSyncRemove} />
+          ))}
         </div>
       )}
 

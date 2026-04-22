@@ -21,12 +21,20 @@ def _load_cfg():
 
 
 def _get_service():
-    from quark_cli.web.deps import get_guangya_drive_service, get_guangya_client
+    from quark_cli.web.deps import get_guangya_client
     client = get_guangya_client()
     if client is None:
         raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证，请先设置 Refresh Token")
     from quark_cli.services.guangya_drive_service import GuangyaDriveService
     return GuangyaDriveService(client)
+
+
+def _get_client():
+    from quark_cli.web.deps import get_guangya_client
+    client = get_guangya_client()
+    if client is None:
+        raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证，请先设置 Refresh Token")
+    return client
 
 
 # ═════════════════════════════════════════════
@@ -180,18 +188,15 @@ def guangya_download(file_id: str = Query(..., description="文件 fileId")):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
-
 @router.post("/guangya/drive/download-to-server")
 def guangya_download_to_server(data: dict = Body(...)):
-    """下载文件到服务端本地磁盘"""
+    """下载单个文件到服务端本地磁盘"""
     file_id = data.get("file_id", "").strip()
     save_dir = data.get("save_dir", "").strip()
     filename = data.get("filename", "").strip() or None
     if not file_id:
         raise HTTPException(status_code=400, detail="缺少 file_id 参数")
     if not save_dir:
-        # 使用配置中的默认下载目录
         cfg = _load_cfg()
         save_dir = cfg.data.get("guangya", {}).get("download_dir", "/downloads/guangya")
     try:
@@ -205,6 +210,80 @@ def guangya_download_to_server(data: dict = Body(...)):
     except Exception as e:
         logger.exception("download-to-server failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═════════════════════════════════════════════
+# Sync (递归目录下载)
+# ═════════════════════════════════════════════
+
+@router.post("/guangya/sync/start")
+def guangya_sync_start(data: dict = Body(...)):
+    """创建 Sync 任务 — 递归下载目录/文件到服务端"""
+    file_id = data.get("file_id", "").strip()
+    save_dir = data.get("save_dir", "").strip()
+    skip_existing = data.get("skip_existing", True)
+    if not file_id:
+        raise HTTPException(status_code=400, detail="缺少 file_id 参数")
+    if not save_dir:
+        cfg = _load_cfg()
+        save_dir = cfg.data.get("guangya", {}).get("download_dir", "/downloads/guangya")
+    try:
+        client = _get_client()
+        from quark_cli.services.guangya_sync import get_sync_manager
+        mgr = get_sync_manager()
+        task = mgr.create_task(client, file_id, save_dir, skip_existing=skip_existing)
+        return task.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("sync start failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/guangya/sync/status")
+def guangya_sync_status(task_id: str = Query(..., description="Sync 任务 ID")):
+    """查询 Sync 任务进度"""
+    from quark_cli.services.guangya_sync import get_sync_manager
+    mgr = get_sync_manager()
+    task = mgr.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return task.to_dict()
+
+
+@router.get("/guangya/sync/list")
+def guangya_sync_list():
+    """列出所有 Sync 任务"""
+    from quark_cli.services.guangya_sync import get_sync_manager
+    mgr = get_sync_manager()
+    tasks = mgr.list_tasks()
+    return {"tasks": [t.to_dict() for t in tasks]}
+
+
+@router.post("/guangya/sync/cancel")
+def guangya_sync_cancel(data: dict = Body(...)):
+    """取消 Sync 任务"""
+    task_id = data.get("task_id", "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="缺少 task_id")
+    from quark_cli.services.guangya_sync import get_sync_manager
+    mgr = get_sync_manager()
+    if mgr.cancel_task(task_id):
+        return {"status": "cancelled"}
+    raise HTTPException(status_code=400, detail="任务不存在或不在运行中")
+
+
+@router.post("/guangya/sync/remove")
+def guangya_sync_remove(data: dict = Body(...)):
+    """删除已完成的 Sync 任务记录"""
+    task_id = data.get("task_id", "").strip()
+    if not task_id:
+        raise HTTPException(status_code=400, detail="缺少 task_id")
+    from quark_cli.services.guangya_sync import get_sync_manager
+    mgr = get_sync_manager()
+    if mgr.remove_task(task_id):
+        return {"status": "removed"}
+    raise HTTPException(status_code=400, detail="任务不存在或仍在运行中")
 
 
 # ═════════════════════════════════════════════
@@ -247,7 +326,6 @@ def guangya_resolve_torrent(data: dict = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 @router.post("/guangya/cloud/resolve-torrent-url")
 def guangya_resolve_torrent_url(data: dict = Body(...)):
     """下载远程 .torrent 文件并解析 (RSS/Web 场景)"""
@@ -263,13 +341,11 @@ def guangya_resolve_torrent_url(data: dict = Body(...)):
         if not client:
             raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证")
 
-        # 下载 .torrent 文件
         auth = {}
         if data.get("cookie"):
             auth["cookie"] = data["cookie"]
         torrent_bytes, filename = download_torrent_file(url, auth=auth)
 
-        # 保存到临时文件
         tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
         try:
             tmp.write(torrent_bytes)
@@ -286,6 +362,7 @@ def guangya_resolve_torrent_url(data: dict = Body(...)):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/guangya/cloud/create")
 def guangya_create_cloud_task(data: dict = Body(...)):

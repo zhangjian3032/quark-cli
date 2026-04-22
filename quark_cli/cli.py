@@ -514,7 +514,13 @@ Web 面板:
     gy_dl.add_argument("file_id", help="文件 fileId")
     gy_dl.add_argument("--save-dir", dest="save_dir", default=None, help="下载到服务器本地目录 (不指定则仅返回下载链接)")
 
-    # guangya cloud (云添加)
+    # guangya sync (递归下载)
+    gy_sync = guangya_sub.add_parser("sync", help="递归下载目录/文件到本地 (sync)")
+    gy_sync.add_argument("file_id", help="目录或文件 fileId")
+    gy_sync.add_argument("--save-dir", dest="save_dir", default=None, help="本地保存目录 (默认读配置 download_dir)")
+    gy_sync.add_argument("--no-skip", dest="no_skip", action="store_true", help="不跳过已存在的文件 (默认跳过大小一致的)")
+
+        # guangya cloud (云添加)
     gy_cloud = guangya_sub.add_parser("cloud", help="云添加 (磁力/种子)")
     gy_cloud_sub = gy_cloud.add_subparsers(dest="guangya_cloud_action")
 

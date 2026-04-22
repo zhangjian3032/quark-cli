@@ -53,10 +53,12 @@ def handle(args):
         _delete(args)
     elif action == "download":
         _download(args)
+    elif action == "sync":
+        _sync(args)
     elif action == "cloud":
         _cloud(args)
     else:
-        display.info("用法: quark-cli guangya {config|account|ls|mkdir|rename|delete|download|cloud}")
+        display.info("用法: quark-cli guangya {config|account|ls|mkdir|rename|delete|download|sync|cloud}")
 
 
 # ═══════════════════════════════════════
@@ -309,6 +311,103 @@ def _download(args):
     display.kvline("有效期", "{}s".format(result.get("urlDuration", 0)))
     display.info("提示: 下载链接有时效限制，请尽快使用")
     display.info("提示: 使用 --save-dir <目录> 可直接下载到服务器")
+
+
+
+
+# ═══════════════════════════════════════
+# sync (递归下载)
+# ═══════════════════════════════════════
+
+def _sync(args):
+    """递归下载目录/文件到本地 — 类似 rsync"""
+    import time
+    import sys as _sys
+    from quark_cli.guangya_api import GuangyaAPI
+    from quark_cli.services.guangya_sync import SyncManager, SyncTask
+
+    client = _get_guangya_client(args)
+    file_id = args.file_id
+    save_dir = getattr(args, "save_dir", None)
+    skip_existing = not getattr(args, "no_skip", False)
+
+    if not save_dir:
+        from quark_cli.config import ConfigManager
+        cfg = ConfigManager(getattr(args, "config", None))
+        cfg.load()
+        save_dir = cfg.data.get("guangya", {}).get("download_dir", "/downloads/guangya")
+
+    display.header("光鸭云盘 Sync")
+    display.kvline("目标目录", save_dir)
+    display.kvline("跳过已存在", "是" if skip_existing else "否")
+    display.info("")
+
+    mgr = SyncManager()
+    task = mgr.create_task(client, file_id, save_dir, skip_existing=skip_existing)
+
+    # 轮询显示进度
+    last_log_idx = 0
+    try:
+        while task.status in (SyncTask.STATUS_PENDING, SyncTask.STATUS_RUNNING):
+            time.sleep(0.5)
+
+            # 输出新日志
+            logs = task.log[last_log_idx:]
+            for line in logs:
+                print(line)
+            last_log_idx = len(task.log)
+
+            # 进度条
+            if task.total_bytes > 0 and task.status == SyncTask.STATUS_RUNNING:
+                pct = task.done_bytes / task.total_bytes * 100
+                done_fmt = GuangyaAPI.format_bytes(task.done_bytes)
+                total_fmt = GuangyaAPI.format_bytes(task.total_bytes)
+                bar_w = 30
+                filled = int(bar_w * pct / 100)
+                bar = "█" * filled + "░" * (bar_w - filled)
+                _sys.stdout.write(
+                    "\r  [{bar}] {pct:.1f}%  {done}/{total}  "
+                    "{df}/{tf} 文件  当前: {cur}    ".format(
+                        bar=bar, pct=pct,
+                        done=done_fmt, total=total_fmt,
+                        df=task.done_files, tf=task.total_files,
+                        cur=task.current_file[:40] if task.current_file else "",
+                    )
+                )
+                _sys.stdout.flush()
+
+    except KeyboardInterrupt:
+        display.info("")
+        display.warning("正在取消...")
+        task.cancel()
+        time.sleep(1)
+
+    # 最终状态
+    print()
+    logs = task.log[last_log_idx:]
+    for line in logs:
+        print(line)
+
+    info = task.to_dict()
+    if is_json_mode():
+        json_out(info)
+        return
+
+    print()
+    if task.status == SyncTask.STATUS_DONE:
+        display.success("Sync 完成")
+    elif task.status == SyncTask.STATUS_CANCELLED:
+        display.warning("Sync 已取消")
+    else:
+        display.error("Sync 失败: {}".format(task.error))
+
+    display.kvline("文件", "{}/{} (跳过 {}, 失败 {})".format(
+        info["done_files"], info["total_files"],
+        info["skipped_files"], info["failed_files"]))
+    display.kvline("大小", "{} / {}".format(info["done_bytes_fmt"], info["total_bytes_fmt"]))
+    display.kvline("耗时", "{:.1f}s".format(info["elapsed"]))
+    if info["speed_fmt"]:
+        display.kvline("速度", info["speed_fmt"])
 
 
 # ═══════════════════════════════════════
