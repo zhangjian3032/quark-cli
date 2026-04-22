@@ -151,6 +151,66 @@ def remove_rule(feed_id: str, index: int):
     return {"status": "removed", "rules_count": len(rules)}
 
 
+
+
+@router.post("/rss/feeds/{feed_id}/match-preview")
+def match_preview(feed_id: str, data: dict = Body(default={})):
+    """预览规则匹配结果 — 对 Feed 当前条目运行规则，返回匹配/未匹配列表"""
+    manager = _get_manager()
+    feed = manager.get_feed(feed_id)
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed 不存在")
+
+    # 拉取 feed 条目
+    test_result = manager.test_feed(feed["feed_url"], auth=feed.get("auth"), max_items=50)
+    if test_result.get("error"):
+        raise HTTPException(status_code=400, detail=test_result["error"])
+
+    items_raw = test_result.get("items", [])
+
+    # 构建 FeedItem 对象
+    from quark_cli.rss.fetcher import FeedItem
+    from quark_cli.rss.matcher import match_item, merge_rule_defaults
+    from datetime import datetime
+
+    rule = merge_rule_defaults(data.get("rule", {}))
+
+    matched = []
+    unmatched = []
+    for item_dict in items_raw:
+        fi = FeedItem(
+            title=item_dict.get("title", ""),
+            link=item_dict.get("link", ""),
+            guid=item_dict.get("guid", ""),
+            pub_date=None,
+            description=item_dict.get("description", ""),
+            author=item_dict.get("author", ""),
+            categories=item_dict.get("categories", []),
+            enclosures=item_dict.get("enclosures", []),
+        )
+        result = match_item(fi, rule)
+        entry = {
+            "title": fi.title,
+            "link": fi.link,
+            "guid": fi.guid,
+            "pub_date": item_dict.get("pub_date"),
+            "description": (fi.description or "")[:200],
+        }
+        if result:
+            entry["target_links"] = result.get_target_links()
+            matched.append(entry)
+        else:
+            unmatched.append(entry)
+
+    return {
+        "total": len(items_raw),
+        "matched_count": len(matched),
+        "unmatched_count": len(unmatched),
+        "matched": matched,
+        "unmatched": unmatched[:20],  # 未匹配只返回前20条
+    }
+
+
 # ── 测试任意 URL ──
 
 @router.post("/rss/test")

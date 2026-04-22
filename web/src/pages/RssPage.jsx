@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Rss, Plus, Play, Pause, RefreshCw, Trash2, ChevronDown, ChevronUp,
   X, Check, Loader2, Settings2, Zap, TestTube, Clock, Filter, Link,
-  AlertCircle, CheckCircle, ArrowLeft, Eye, History } from 'lucide-react'
+  AlertCircle, CheckCircle, ArrowLeft, Eye, History, Search } from 'lucide-react'
 
 const API = '/api'
 
@@ -151,17 +151,19 @@ function FeedModal({ feed, onClose, onSave }) {
   )
 }
 
-// ── 添加规则弹窗 ──
+// ── 添加规则弹窗 (优化版) ──
 
 function RuleModal({ feedId, onClose, onSave }) {
   const [form, setForm] = useState({
-    match: '', exclude: '', quality: '',
+    name: '', match: '', exclude: '', quality: '',
     min_size_gb: '', max_size_gb: '',
     link_type: 'any', action: 'auto_save', save_path: '',
     torrent_client: '', torrent_save_path: '', torrent_category: '', torrent_tags: '', torrent_paused: false,
     guangya_parent_id: '',
   })
   const [saving, setSaving] = useState(false)
+  const [previewing, setPreviewing] = useState(false)
+  const [preview, setPreview] = useState(null)
 
   const handleSave = async () => {
     setSaving(true)
@@ -189,6 +191,33 @@ function RuleModal({ feedId, onClose, onSave }) {
     }
   }
 
+  const handlePreview = async () => {
+    setPreviewing(true)
+    setPreview(null)
+    try {
+      const rule = { ...form }
+      if (rule.min_size_gb) rule.min_size_gb = parseFloat(rule.min_size_gb)
+      else delete rule.min_size_gb
+      if (rule.max_size_gb) rule.max_size_gb = parseFloat(rule.max_size_gb)
+      else delete rule.max_size_gb
+
+      const resp = await fetch(`${API}/rss/feeds/${feedId}/match-preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rule }),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        throw new Error(err.detail || '预览失败')
+      }
+      setPreview(await resp.json())
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setPreviewing(false)
+    }
+  }
+
   const F = (label, key, type = 'text', placeholder = '') => (
     <label className="block">
       <span className="text-xs text-gray-400 mb-1 block">{label}</span>
@@ -205,15 +234,21 @@ function RuleModal({ feedId, onClose, onSave }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-surface-1 rounded-xl border border-surface-3 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-surface-1 rounded-xl border border-surface-3 w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-surface-3">
           <h3 className="font-semibold">添加规则</h3>
           <button onClick={onClose} className="p-1 hover:bg-surface-2 rounded"><X size={18} /></button>
         </div>
 
-        <div className="p-4 space-y-3">
-          {F('匹配正则 *', 'match', 'text', '如: 4K|2160p|Remux')}
-          {F('排除正则', 'exclude', 'text', '如: 抢版|CAM|TS')}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {F('规则名称 *', 'name', 'text', '如: 4K电影自动转存')}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              {F('匹配正则', 'match', 'text', '留空匹配所有 如: 4K|2160p')}
+              <div className="text-[10px] text-gray-600 mt-0.5">留空 = 匹配所有条目</div>
+            </div>
+            {F('排除正则', 'exclude', 'text', '如: 抢版|CAM|TS')}
+          </div>
           {F('画质过滤', 'quality', 'text', '如: 4K|1080p')}
 
           <div className="grid grid-cols-2 gap-3">
@@ -259,12 +294,9 @@ function RuleModal({ feedId, onClose, onSave }) {
             <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
               <span className="text-xs text-gray-500 block">光鸭云盘参数</span>
               {F('保存目录 ID', 'guangya_parent_id', 'text', '留空保存到根目录')}
-              <div className="text-[10px] text-gray-600">
-                链接类型建议选择 "磁力链接" 或 "Torrent 附件"
-              </div>
+              <div className="text-[10px] text-gray-600">链接类型建议选择 "磁力链接" 或 "Torrent 附件"</div>
             </div>
           )}
-
 
           {form.action === 'torrent' && (
             <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
@@ -283,12 +315,58 @@ function RuleModal({ feedId, onClose, onSave }) {
               </label>
             </div>
           )}
+
+          {/* 预览匹配结果 */}
+          <div className="border-t border-surface-3 pt-3">
+            <button
+              onClick={handlePreview}
+              disabled={previewing}
+              className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-surface-2 hover:bg-surface-3 disabled:opacity-50"
+            >
+              {previewing ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+              预览匹配结果
+            </button>
+
+            {preview && (
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center gap-3 text-xs">
+                  <span className="px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold">
+                    匹配 {preview.matched_count}
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-gray-500/20 text-gray-400 font-semibold">
+                    未匹配 {preview.unmatched_count}
+                  </span>
+                  <span className="text-gray-500">共 {preview.total} 条</span>
+                </div>
+
+                {preview.matched.length > 0 && (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {preview.matched.map((item, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs p-2 bg-green-500/5 rounded border border-green-500/10">
+                        <CheckCircle size={12} className="text-green-400 flex-shrink-0" />
+                        <span className="truncate flex-1 text-gray-300">{item.title}</span>
+                        {item.target_links?.length > 0 && (
+                          <span className="text-[10px] text-gray-500 flex-shrink-0">{item.target_links.length} 链接</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {preview.matched.length === 0 && (
+                  <div className="text-xs text-gray-500 p-3 bg-surface-2 rounded-lg text-center">
+                    当前规则未匹配到任何条目
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 p-4 border-t border-surface-3">
           <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg hover:bg-surface-2">取消</button>
           <button
-            onClick={handleSave} disabled={saving || !form.match.trim()}
+            onClick={handleSave} disabled={saving || !form.name.trim()}
             className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-500 disabled:opacity-50 flex items-center gap-2"
           >
             {saving && <Loader2 size={14} className="animate-spin" />}
@@ -305,7 +383,6 @@ function RuleModal({ feedId, onClose, onSave }) {
 function TestItemCard({ item, index }) {
   const [expanded, setExpanded] = useState(false)
 
-  // 从 description 中简单提取链接标签
   const linkBadges = []
   const desc = item.description || ''
   if (/pan\.quark\.cn/i.test(desc) || /pan\.quark\.cn/i.test(item.link || '')) linkBadges.push({ type: 'quark', color: 'text-blue-400 bg-blue-500/20' })
@@ -313,7 +390,6 @@ function TestItemCard({ item, index }) {
   if (/magnet:\?/i.test(desc)) linkBadges.push({ type: 'magnet', color: 'text-purple-400 bg-purple-500/20' })
   if (item.enclosures && item.enclosures.length > 0) linkBadges.push({ type: 'enclosure', color: 'text-orange-400 bg-orange-500/20' })
 
-  // 清理 HTML 标签用于纯文本显示
   const plainDesc = desc.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 
   return (
@@ -347,23 +423,18 @@ function TestItemCard({ item, index }) {
 
       {expanded && (
         <div className="border-t border-surface-3 p-3 space-y-2 text-xs bg-surface-1/50">
-          {/* 描述 */}
           {plainDesc && (
             <div>
               <div className="text-gray-500 mb-1 font-semibold">描述</div>
               <div className="text-gray-300 leading-relaxed whitespace-pre-wrap max-h-32 overflow-y-auto">{plainDesc.slice(0, 800)}{plainDesc.length > 800 ? '...' : ''}</div>
             </div>
           )}
-
-          {/* 链接 */}
           {item.link && (
             <div>
               <div className="text-gray-500 mb-1 font-semibold">链接</div>
               <a href={item.link} target="_blank" rel="noopener noreferrer" className="text-brand-400 hover:underline break-all">{item.link}</a>
             </div>
           )}
-
-          {/* 分类 */}
           {(item.categories || []).length > 0 && (
             <div>
               <div className="text-gray-500 mb-1 font-semibold">分类</div>
@@ -374,8 +445,6 @@ function TestItemCard({ item, index }) {
               </div>
             </div>
           )}
-
-          {/* Enclosures */}
           {(item.enclosures || []).length > 0 && (
             <div>
               <div className="text-gray-500 mb-1 font-semibold">附件 ({item.enclosures.length})</div>
@@ -393,8 +462,6 @@ function TestItemCard({ item, index }) {
               </div>
             </div>
           )}
-
-          {/* GUID */}
           {item.guid && (
             <div className="text-gray-600 pt-1 border-t border-surface-3">
               GUID: <span className="font-mono text-gray-500">{item.guid}</span>
@@ -489,7 +556,6 @@ function TestModal({ feed, onClose }) {
 
           {result && (
             <div className="space-y-3">
-              {/* Feed 信息 + 条目统计 */}
               <div className="bg-surface-2 border border-surface-3 rounded-lg p-3">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-gray-400">Feed: <span className="text-white font-medium">{result.feed_title || '未知'}</span></span>
@@ -507,7 +573,6 @@ function TestModal({ feed, onClose }) {
                 </div>
               </div>
 
-              {/* 条目列表 */}
               <div className="space-y-2">
                 <div className="text-xs text-gray-500">点击条目展开详情</div>
                 {(result.items || []).map((item, i) => (
@@ -516,6 +581,104 @@ function TestModal({ feed, onClose }) {
               </div>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── 检查结果弹窗 ──
+
+function CheckResultModal({ result, onClose }) {
+  const actions = result?.actions || []
+  const matched = result?.matched || 0
+  const newItems = result?.new_items || 0
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="relative bg-surface-1 rounded-xl border border-surface-3 w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="flex items-center justify-between p-4 border-b border-surface-3">
+          <h3 className="font-semibold flex items-center gap-2">
+            <Zap size={18} className="text-brand-400" />
+            检查结果 — {result?.feed_name || ''}
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-surface-2 rounded"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 text-center">
+              <div className="text-xl font-bold text-blue-400">{newItems}</div>
+              <div className="text-[10px] text-gray-500">新条目</div>
+            </div>
+            <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 text-center">
+              <div className="text-xl font-bold text-green-400">{matched}</div>
+              <div className="text-[10px] text-gray-500">匹配</div>
+            </div>
+            <div className="bg-surface-2 border border-surface-3 rounded-lg p-3 text-center">
+              <div className="text-xl font-bold text-brand-400">
+                {actions.filter(a => a.success).length}
+              </div>
+              <div className="text-[10px] text-gray-500">成功执行</div>
+            </div>
+          </div>
+
+          {result?.duration && (
+            <div className="text-xs text-gray-500">耗时 {result.duration}s</div>
+          )}
+
+          {/* Actions list */}
+          {actions.length > 0 ? (
+            <div className="space-y-2">
+              <div className="text-xs text-gray-400 font-semibold">匹配结果</div>
+              {actions.map((a, i) => (
+                <div key={i} className={`text-sm p-3 rounded-lg border ${
+                  a.dry_run ? 'bg-yellow-500/5 border-yellow-500/10' :
+                  a.success ? 'bg-green-500/5 border-green-500/10' :
+                  'bg-red-500/5 border-red-500/10'
+                }`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    {a.dry_run ? (
+                      <Eye size={14} className="text-yellow-400 flex-shrink-0" />
+                    ) : a.success ? (
+                      <CheckCircle size={14} className="text-green-400 flex-shrink-0" />
+                    ) : (
+                      <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
+                    )}
+                    <span className="font-medium truncate flex-1">{a.item_title || a.title || '未知'}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      a.action === 'auto_save' ? 'bg-green-500/20 text-green-400' :
+                      a.action === 'torrent' ? 'bg-purple-500/20 text-purple-400' :
+                      a.action === 'guangya' ? 'bg-cyan-500/20 text-cyan-400' :
+                      'bg-gray-500/20 text-gray-400'
+                    }`}>
+                      {a.action}
+                    </span>
+                  </div>
+                  {a.rule_name && <div className="text-xs text-gray-500">规则: {a.rule_name}</div>}
+                  {a.message && <div className="text-xs text-gray-500 mt-0.5">{a.message}</div>}
+                  {a.error && <div className="text-xs text-red-400 mt-0.5">{a.error}</div>}
+                  {a.target_links?.length > 0 && (
+                    <div className="text-xs text-gray-600 mt-0.5">{a.target_links.length} 个链接</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : matched === 0 && newItems > 0 ? (
+            <div className="text-center text-gray-500 text-sm py-4">
+              {newItems} 个新条目，无匹配规则命中
+            </div>
+          ) : newItems === 0 ? (
+            <div className="text-center text-gray-500 text-sm py-4">
+              没有新条目 (可能已去重或 Feed 未更新)
+            </div>
+          ) : null}
+        </div>
+
+        <div className="flex justify-end p-4 border-t border-surface-3">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg bg-surface-2 hover:bg-surface-3">关闭</button>
         </div>
       </div>
     </div>
@@ -592,6 +755,7 @@ function FeedDetail({ feed, onBack, onRefresh }) {
   const [checking, setChecking] = useState(false)
   const [testing, setTesting] = useState(false)
   const [editing, setEditing] = useState(false)
+  const [checkResult, setCheckResult] = useState(null)
 
   const handleCheck = async (dryRun = false) => {
     setChecking(true)
@@ -606,7 +770,7 @@ function FeedDetail({ feed, onBack, onRefresh }) {
         throw new Error(err.detail || '检查失败')
       }
       const result = await resp.json()
-      alert(`检查完成: ${result.new_items || 0} 新匹配, ${result.saved_items || 0} 已转存`)
+      setCheckResult(result)
       onRefresh()
     } catch (e) {
       alert(e.message)
@@ -749,6 +913,7 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       <span className="text-xs font-mono px-1.5 py-0.5 bg-brand-600/20 text-brand-300 rounded">
                         #{i + 1}
                       </span>
+                      {rule.name && <span className="text-sm font-medium text-gray-200">{rule.name}</span>}
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                         rule.action === 'auto_save' ? 'bg-green-500/20 text-green-400' :
                         rule.action === 'torrent' ? 'bg-purple-500/20 text-purple-400' :
@@ -760,7 +925,11 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       </span>
                     </div>
                     <div className="space-y-0.5 text-xs">
-                      <div><span className="text-gray-500">匹配:</span> <span className="text-green-400 font-mono">{rule.match || '.*'}</span></div>
+                      <div>
+                        <span className="text-gray-500">匹配:</span>{' '}
+                        <span className="text-green-400 font-mono">{rule.match || '(全部)'}</span>
+                        {!rule.match && <span className="text-gray-600 ml-1">匹配所有条目</span>}
+                      </div>
                       {rule.exclude && <div><span className="text-gray-500">排除:</span> <span className="text-red-400 font-mono">{rule.exclude}</span></div>}
                       {rule.quality && <div><span className="text-gray-500">画质:</span> <span className="text-gray-300">{rule.quality}</span></div>}
                       {(rule.min_size_gb || rule.max_size_gb) && (
@@ -797,6 +966,9 @@ function FeedDetail({ feed, onBack, onRefresh }) {
       {editing && (
         <FeedModal feed={feed} onClose={() => setEditing(false)} onSave={() => { setEditing(false); onRefresh() }} />
       )}
+      {checkResult && (
+        <CheckResultModal result={checkResult} onClose={() => setCheckResult(null)} />
+      )}
     </div>
   )
 }
@@ -805,6 +977,7 @@ function FeedDetail({ feed, onBack, onRefresh }) {
 
 function FeedCard({ feed, onRefresh, onSelect }) {
   const [loading, setLoading] = useState(false)
+  const [checkResult, setCheckResult] = useState(null)
   const stats = feed.stats || {}
   const rules = feed.rules || []
 
@@ -826,71 +999,99 @@ function FeedCard({ feed, onRefresh, onSelect }) {
     }
   }
 
+  const handleCheck = async () => {
+    setLoading(true)
+    try {
+      const resp = await fetch(`${API}/rss/feeds/${feed.id}/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}))
+        throw new Error(err.detail || '检查失败')
+      }
+      const result = await resp.json()
+      setCheckResult(result)
+      onRefresh()
+    } catch (e) {
+      alert(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
-    <div
-      className="bg-surface-1 border border-surface-3 rounded-xl p-4 hover:border-surface-4 transition cursor-pointer"
-      onClick={() => onSelect(feed)}
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 bg-orange-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
-            <Rss size={20} className="text-orange-400" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="font-semibold flex items-center gap-2">
-              <span className="truncate">{feed.name || '未命名'}</span>
-              <StatusBadge enabled={feed.enabled} error={feed.error} />
+    <>
+      <div
+        className="bg-surface-1 border border-surface-3 rounded-xl p-4 hover:border-surface-4 transition cursor-pointer"
+        onClick={() => onSelect(feed)}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-10 h-10 bg-orange-600/20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Rss size={20} className="text-orange-400" />
             </div>
-            <div className="text-xs text-gray-500 mt-0.5 truncate">{feed.feed_url}</div>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold flex items-center gap-2">
+                <span className="truncate">{feed.name || '未命名'}</span>
+                <StatusBadge enabled={feed.enabled} error={feed.error} />
+              </div>
+              <div className="text-xs text-gray-500 mt-0.5 truncate">{feed.feed_url}</div>
+            </div>
           </div>
+        </div>
+
+        {/* Mini Stats */}
+        <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
+          <span>{rules.length} 规则</span>
+          <span>{stats.total_matched || 0} 匹配</span>
+          <span>{stats.total_saved || 0} 转存</span>
+        </div>
+
+        {/* Info */}
+        <div className="flex items-center justify-between text-xs text-gray-500">
+          <span>上次检查: {timeAgo(feed.last_check)}</span>
+          <span>每 {feed.interval_minutes}m</span>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 mt-3 pt-3 border-t border-surface-3" onClick={e => e.stopPropagation()}>
+          <button
+            onClick={handleCheck}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 disabled:opacity-50"
+          >
+            {loading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
+            检查
+          </button>
+
+          <button
+            onClick={() => action(`${API}/rss/feeds/${feed.id}/toggle`)}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg hover:bg-surface-2"
+          >
+            {feed.enabled ? <Pause size={12} /> : <Play size={12} />}
+            {feed.enabled ? '暂停' : '启用'}
+          </button>
+
+          <div className="flex-1" />
+
+          <button
+            onClick={() => { if (confirm(`确认删除 Feed「${feed.name || feed.feed_url}」?`)) action(`${API}/rss/feeds/${feed.id}`, 'DELETE') }}
+            disabled={loading}
+            className="p-1.5 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
       </div>
 
-      {/* Mini Stats */}
-      <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
-        <span>{rules.length} 规则</span>
-        <span>{stats.total_matched || 0} 匹配</span>
-        <span>{stats.total_saved || 0} 转存</span>
-      </div>
-
-      {/* Info */}
-      <div className="flex items-center justify-between text-xs text-gray-500">
-        <span>上次检查: {timeAgo(feed.last_check)}</span>
-        <span>每 {feed.interval_minutes}m</span>
-      </div>
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-surface-3" onClick={e => e.stopPropagation()}>
-        <button
-          onClick={() => action(`${API}/rss/feeds/${feed.id}/check`, 'POST', {})}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-brand-600/20 text-brand-400 hover:bg-brand-600/30 disabled:opacity-50"
-        >
-          {loading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-          检查
-        </button>
-
-        <button
-          onClick={() => action(`${API}/rss/feeds/${feed.id}/toggle`)}
-          disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg hover:bg-surface-2"
-        >
-          {feed.enabled ? <Pause size={12} /> : <Play size={12} />}
-          {feed.enabled ? '暂停' : '启用'}
-        </button>
-
-        <div className="flex-1" />
-
-        <button
-          onClick={() => { if (confirm(`确认删除 Feed「${feed.name || feed.feed_url}」?`)) action(`${API}/rss/feeds/${feed.id}`, 'DELETE') }}
-          disabled={loading}
-          className="p-1.5 rounded-lg text-red-400/60 hover:text-red-400 hover:bg-red-500/10"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-    </div>
+      {checkResult && (
+        <CheckResultModal result={checkResult} onClose={() => setCheckResult(null)} />
+      )}
+    </>
   )
 }
 
@@ -918,7 +1119,6 @@ export default function RssPage() {
       setFeeds(feedsJson.feeds || [])
       setScheduler(schedJson)
 
-      // 如果当前有选中 feed，更新它
       setSelectedFeed(prev => {
         if (!prev) return null
         const updated = (feedsJson.feeds || []).find(f => f.id === prev.id)
@@ -949,7 +1149,6 @@ export default function RssPage() {
   const enabledFeeds = feeds.filter(f => f.enabled)
   const disabledFeeds = feeds.filter(f => !f.enabled)
 
-  // 详情视图
   if (selectedFeed) {
     return (
       <div className="space-y-6">
