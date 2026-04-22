@@ -182,11 +182,10 @@ def get_guangya_client():
     cfg = get_config()
     cfg.load()
     gy = cfg.data.get("guangya", {})
-    did = gy.get("did", "")
     refresh_token = gy.get("refresh_token", "")
-    if not did and not refresh_token:
-        raise ValueError("未配置光鸭云盘凭证，请在设置页面配置 DID 和 Refresh Token")
-    client = GuangyaAPI(did=did, refresh_token=refresh_token)
+    if not refresh_token:
+        return None
+    client = GuangyaAPI(refresh_token=refresh_token)
     _guangya_client_cache = client
     return client
 

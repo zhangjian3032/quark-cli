@@ -159,6 +159,7 @@ function RuleModal({ feedId, onClose, onSave }) {
     min_size_gb: '', max_size_gb: '',
     link_type: 'any', action: 'auto_save', save_path: '',
     torrent_client: '', torrent_save_path: '', torrent_category: '', torrent_tags: '', torrent_paused: false,
+    guangya_parent_id: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -246,12 +247,24 @@ function RuleModal({ feedId, onClose, onSave }) {
             >
               <option value="auto_save">自动转存</option>
               <option value="torrent">推送 qBittorrent</option>
+              <option value="guangya">光鸭云盘 云添加</option>
               <option value="notify">仅通知</option>
               <option value="log">仅记录</option>
             </select>
           </label>
 
           {form.action === 'auto_save' && F('存储路径', 'save_path', 'text', '/RSS转存')}
+
+          {form.action === 'guangya' && (
+            <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
+              <span className="text-xs text-gray-500 block">光鸭云盘参数</span>
+              {F('保存目录 ID', 'guangya_parent_id', 'text', '留空保存到根目录')}
+              <div className="text-[10px] text-gray-600">
+                链接类型建议选择 "磁力链接" 或 "Torrent 附件"
+              </div>
+            </div>
+          )}
+
 
           {form.action === 'torrent' && (
             <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
@@ -739,10 +752,11 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                         rule.action === 'auto_save' ? 'bg-green-500/20 text-green-400' :
                         rule.action === 'torrent' ? 'bg-purple-500/20 text-purple-400' :
+                        rule.action === 'guangya' ? 'bg-cyan-500/20 text-cyan-400' :
                         rule.action === 'notify' ? 'bg-blue-500/20 text-blue-400' :
                         'bg-gray-500/20 text-gray-400'
                       }`}>
-                        {rule.action === 'auto_save' ? '自动转存' : rule.action === 'torrent' ? 'qBittorrent' : rule.action === 'notify' ? '通知' : '记录'}
+                        {rule.action === 'auto_save' ? '自动转存' : rule.action === 'torrent' ? 'qBittorrent' : rule.action === 'guangya' ? '光鸭云添加' : rule.action === 'notify' ? '通知' : '记录'}
                       </span>
                     </div>
                     <div className="space-y-0.5 text-xs">
@@ -758,6 +772,7 @@ function FeedDetail({ feed, onBack, onRefresh }) {
                       {rule.torrent_category && <div><span className="text-gray-500">qB 分类:</span> <span className="text-gray-300">{rule.torrent_category}</span></div>}
                       {rule.torrent_tags && <div><span className="text-gray-500">qB 标签:</span> <span className="text-gray-300">{rule.torrent_tags}</span></div>}
                       {rule.torrent_client && <div><span className="text-gray-500">qB 实例:</span> <span className="text-gray-300">{rule.torrent_client}</span></div>}
+                      {rule.guangya_parent_id && <div><span className="text-gray-500">光鸭目录:</span> <span className="text-gray-300">{rule.guangya_parent_id}</span></div>}
                     </div>
                   </div>
                   <button

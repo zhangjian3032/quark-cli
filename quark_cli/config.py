@@ -33,8 +33,8 @@ DEFAULT_CONFIG = {
     },
     "tasklist": [],
     "guangya": {
-        "did": "",
         "refresh_token": "",
+        "download_dir": "/downloads/guangya",
     },
     "torrent_clients": {
         "default": "",

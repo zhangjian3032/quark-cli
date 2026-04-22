@@ -21,8 +21,12 @@ def _load_cfg():
 
 
 def _get_service():
-    from quark_cli.web.deps import get_guangya_drive_service
-    return get_guangya_drive_service()
+    from quark_cli.web.deps import get_guangya_drive_service, get_guangya_client
+    client = get_guangya_client()
+    if client is None:
+        raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证，请先设置 Refresh Token")
+    from quark_cli.services.guangya_drive_service import GuangyaDriveService
+    return GuangyaDriveService(client)
 
 
 # ═════════════════════════════════════════════
@@ -34,12 +38,12 @@ def get_guangya_config():
     """获取光鸭云盘配置 (隐藏敏感信息)"""
     cfg = _load_cfg()
     gy = cfg.data.get("guangya", {})
-    did = gy.get("did", "")
     rt = gy.get("refresh_token", "")
+    dl_dir = gy.get("download_dir", "/downloads/guangya")
     return {
-        "did": did,
         "has_refresh_token": bool(rt),
         "refresh_token_preview": "{}...{}".format(rt[:6], rt[-4:]) if len(rt) > 10 else ("***" if rt else ""),
+        "download_dir": dl_dir,
     }
 
 
@@ -49,10 +53,10 @@ def set_guangya_config(data: dict = Body(...)):
     cfg = _load_cfg()
     cfg.load()
     gy = cfg.data.setdefault("guangya", {})
-    if "did" in data:
-        gy["did"] = data["did"].strip()
     if "refresh_token" in data:
         gy["refresh_token"] = data["refresh_token"].strip()
+    if "download_dir" in data:
+        gy["download_dir"] = data["download_dir"].strip()
     cfg._data["guangya"] = gy
     cfg.save()
 
@@ -176,6 +180,33 @@ def guangya_download(file_id: str = Query(..., description="文件 fileId")):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@router.post("/guangya/drive/download-to-server")
+def guangya_download_to_server(data: dict = Body(...)):
+    """下载文件到服务端本地磁盘"""
+    file_id = data.get("file_id", "").strip()
+    save_dir = data.get("save_dir", "").strip()
+    filename = data.get("filename", "").strip() or None
+    if not file_id:
+        raise HTTPException(status_code=400, detail="缺少 file_id 参数")
+    if not save_dir:
+        # 使用配置中的默认下载目录
+        cfg = _load_cfg()
+        save_dir = cfg.data.get("guangya", {}).get("download_dir", "/downloads/guangya")
+    try:
+        svc = _get_service()
+        result = svc.download_to_local(file_id, save_dir, filename=filename)
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("download-to-server failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ═════════════════════════════════════════════
 # 云添加 (磁力 / 种子)
 # ═════════════════════════════════════════════
@@ -215,6 +246,46 @@ def guangya_resolve_torrent(data: dict = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+
+@router.post("/guangya/cloud/resolve-torrent-url")
+def guangya_resolve_torrent_url(data: dict = Body(...)):
+    """下载远程 .torrent 文件并解析 (RSS/Web 场景)"""
+    url = data.get("url", "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="缺少 url 参数")
+    try:
+        import tempfile, os
+        from quark_cli.rss.torrent_client import download_torrent_file
+        from quark_cli.web.deps import get_guangya_client
+
+        client = get_guangya_client()
+        if not client:
+            raise HTTPException(status_code=400, detail="未配置光鸭云盘凭证")
+
+        # 下载 .torrent 文件
+        auth = {}
+        if data.get("cookie"):
+            auth["cookie"] = data["cookie"]
+        torrent_bytes, filename = download_torrent_file(url, auth=auth)
+
+        # 保存到临时文件
+        tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+        try:
+            tmp.write(torrent_bytes)
+            tmp.close()
+            resolve_data = client.resolve_torrent(tmp.name)
+        finally:
+            os.unlink(tmp.name)
+
+        if not resolve_data:
+            raise HTTPException(status_code=400, detail="种子解析失败")
+
+        return resolve_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/guangya/cloud/create")
 def guangya_create_cloud_task(data: dict = Body(...)):

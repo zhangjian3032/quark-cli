@@ -100,6 +100,66 @@ class GuangyaDriveService:
             "vipExpireTime": info.get("vipExpireTime", 0),
         }
 
+
+    # ── 下载到服务端本地 ──
+
+    def download_to_local(self, file_id, save_dir, filename=None):
+        """下载文件到服务端本地磁盘
+
+        Args:
+            file_id: 文件 fileId
+            save_dir: 本地保存目录
+            filename: 文件名 (默认使用云端文件名)
+
+        Returns:
+            {"path": "/saved/path", "size": ..., "fileName": ...} or {"error": ...}
+        """
+        import os
+        import requests as _requests
+
+        # 获取文件详情 (拿文件名)
+        if not filename:
+            detail = self._client.get_file_detail(file_id)
+            if detail:
+                filename = detail.get("fileName", file_id)
+            else:
+                filename = file_id
+
+        # 获取签名下载链接
+        dl = self._client.download(file_id)
+        if not dl or not dl.get("signedURL"):
+            return {"error": "获取下载链接失败"}
+
+        signed_url = dl["signedURL"]
+
+        # 确保目录存在
+        os.makedirs(save_dir, exist_ok=True)
+        save_path = os.path.join(save_dir, filename)
+
+        # 流式下载
+        try:
+            resp = _requests.get(signed_url, stream=True, timeout=600)
+            resp.raise_for_status()
+            total = 0
+            with open(save_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+                        total += len(chunk)
+            return {
+                "path": save_path,
+                "fileName": filename,
+                "size": total,
+                "size_fmt": GuangyaAPI.format_bytes(total),
+            }
+        except Exception as e:
+            # 清理不完整文件
+            if os.path.exists(save_path):
+                try:
+                    os.remove(save_path)
+                except OSError:
+                    pass
+            return {"error": "下载失败: {}".format(str(e))}
     # ── 磁力解析 ──
 
     def resolve_magnet(self, magnet_url):

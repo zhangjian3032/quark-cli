@@ -266,6 +266,35 @@ def _delete(args):
 def _download(args):
     from quark_cli.guangya_api import GuangyaAPI
     svc = _get_service(args)
+
+    save_dir = getattr(args, "save_dir", None)
+
+    # 如果指定了 --save-dir，下载到服务器本地
+    if save_dir:
+        if not save_dir.strip():
+            # 从配置读取默认目录
+            from quark_cli.config import ConfigManager
+            cfg = ConfigManager(getattr(args, "config", None))
+            cfg.load()
+            save_dir = cfg.data.get("guangya", {}).get("download_dir", "/downloads/guangya")
+
+        display.info("正在下载到 {} ...".format(save_dir))
+        result = svc.download_to_local(args.file_id, save_dir)
+        if "error" in result:
+            display.error(result["error"])
+            return
+
+        if is_json_mode():
+            json_out(result)
+            return
+
+        display.success("下载完成")
+        display.kvline("文件", result.get("fileName", ""))
+        display.kvline("路径", result.get("path", ""))
+        display.kvline("大小", result.get("size_fmt", ""))
+        return
+
+    # 默认: 仅获取下载链接
     result = svc.get_download_url(args.file_id)
     if "error" in result:
         display.error(result["error"])
@@ -279,6 +308,7 @@ def _download(args):
     display.kvline("URL", result.get("signedURL", "N/A"))
     display.kvline("有效期", "{}s".format(result.get("urlDuration", 0)))
     display.info("提示: 下载链接有时效限制，请尽快使用")
+    display.info("提示: 使用 --save-dir <目录> 可直接下载到服务器")
 
 
 # ═══════════════════════════════════════

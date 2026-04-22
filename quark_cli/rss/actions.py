@@ -48,6 +48,9 @@ def execute_action(match_result, config_path=None):
         elif action == "torrent":
             result["detail"] = _action_torrent(match_result, config_path)
             result["success"] = result["detail"].get("success", False)
+        elif action == "guangya":
+            result["detail"] = _action_guangya(match_result, config_path)
+            result["success"] = result["detail"].get("success", False)
         elif action == "notify":
             result["detail"] = _action_notify(match_result, config_path)
             result["success"] = True
@@ -279,6 +282,127 @@ def _get_feed_auth(match_result, config_path):
         pass
 
     return {}
+
+
+
+def _action_guangya(match_result, config_path):
+    """
+    光鸭云盘云添加动作 — RSS 匹配到 magnet/torrent 后推送到光鸭
+
+    根据 link_type 自动判断:
+      - magnet:        解析磁力 → 创建云添加任务
+      - enclosure/torrent_enclosure: 下载 .torrent → 上传解析 → 创建云添加任务
+    """
+    from quark_cli.config import ConfigManager
+    from quark_cli.guangya_api import GuangyaAPI
+    from quark_cli.rss.torrent_client import (
+        download_torrent_file, is_magnet_url, is_torrent_url,
+    )
+    import tempfile, os
+
+    rule = match_result.rule
+    item = match_result.item
+
+    # 1. 获取光鸭客户端
+    cfg = ConfigManager(config_path)
+    cfg.load()
+    gy_cfg = cfg.data.get("guangya", {})
+    refresh_token = gy_cfg.get("refresh_token", "")
+    if not refresh_token:
+        return {"success": False, "error": "未配置光鸭云盘 refresh_token"}
+
+    client = GuangyaAPI(refresh_token=refresh_token)
+    info = client.init()
+    if not info:
+        return {"success": False, "error": "光鸭云盘凭证无效"}
+
+    # 2. 保存目录
+    parent_id = rule.get("guangya_parent_id", "") or ""
+
+    # 3. 获取目标链接
+    target_links = match_result.get_target_links()
+    if not target_links:
+        return {"success": False, "error": "无可用链接 (link_type: {})".format(match_result.link_type)}
+
+    link = target_links[0]
+
+    # 4. 根据链接类型处理
+    try:
+        if is_magnet_url(link):
+            # 磁力链接 → 解析 → 创建任务
+            resolve_data = client.resolve_magnet(link)
+            if not resolve_data:
+                return {"success": False, "error": "磁力链接解析失败", "url": link[:120]}
+
+            bt_info = resolve_data.get("btResInfo", {})
+            subfiles = bt_info.get("subfiles", [])
+            file_indexes = list(range(len(subfiles))) if subfiles else None
+
+            task = client.create_cloud_task(
+                url=link, parent_id=parent_id, file_indexes=file_indexes,
+            )
+            if not task:
+                return {"success": False, "error": "创建云添加任务失败", "url": link[:120]}
+
+            return {
+                "success": True,
+                "method": "magnet",
+                "url": link[:120],
+                "task_id": task.get("taskId", ""),
+                "file_name": bt_info.get("fileName", item.title),
+            }
+
+        elif is_torrent_url(link) or _is_torrent_enclosure(match_result, link):
+            # 种子 URL → 下载 → 上传解析 → 创建任务
+            auth = _get_feed_auth(match_result, config_path)
+            torrent_bytes, filename = download_torrent_file(link, auth=auth)
+
+            # 保存到临时文件供 API 上传
+            tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+            try:
+                tmp.write(torrent_bytes)
+                tmp.close()
+
+                resolve_data = client.resolve_torrent(tmp.name)
+                if not resolve_data:
+                    return {"success": False, "error": "种子解析失败", "url": link[:120]}
+
+                bt_info = resolve_data.get("btResInfo", {})
+                subfiles = bt_info.get("subfiles", [])
+                file_indexes = list(range(len(subfiles))) if subfiles else None
+                magnet_url = resolve_data.get("url", "")
+
+                if not magnet_url:
+                    # 从 info_hash 构造 magnet
+                    info_hash = bt_info.get("infoHash", "")
+                    if info_hash:
+                        magnet_url = "magnet:?xt=urn:btih:{}".format(info_hash)
+                    else:
+                        return {"success": False, "error": "无法获取磁力链接", "url": link[:120]}
+
+                task = client.create_cloud_task(
+                    url=magnet_url, parent_id=parent_id, file_indexes=file_indexes,
+                )
+                if not task:
+                    return {"success": False, "error": "创建云添加任务失败", "url": link[:120]}
+
+                return {
+                    "success": True,
+                    "method": "torrent",
+                    "url": link[:120],
+                    "task_id": task.get("taskId", ""),
+                    "file_name": bt_info.get("fileName", filename),
+                }
+            finally:
+                os.unlink(tmp.name)
+
+        else:
+            # 未知链接类型, 尝试作为磁力链接
+            return {"success": False, "error": "不支持的链接类型: {}".format(link[:80])}
+
+    except Exception as e:
+        logger.exception("光鸭云添加异常: %s", item.title)
+        return {"success": False, "error": str(e), "url": link[:120]}
 
 
 def _action_notify(match_result, config_path):

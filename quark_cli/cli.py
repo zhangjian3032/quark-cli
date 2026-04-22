@@ -510,8 +510,9 @@ Web 面板:
     gy_rm.add_argument("file_id", nargs="+", help="文件 fileId (可多个)")
 
     # guangya download
-    gy_dl = guangya_sub.add_parser("download", help="获取下载链接")
+    gy_dl = guangya_sub.add_parser("download", help="下载文件 (获取链接 或 下载到服务器)")
     gy_dl.add_argument("file_id", help="文件 fileId")
+    gy_dl.add_argument("--save-dir", dest="save_dir", default=None, help="下载到服务器本地目录 (不指定则仅返回下载链接)")
 
     # guangya cloud (云添加)
     gy_cloud = guangya_sub.add_parser("cloud", help="云添加 (磁力/种子)")
