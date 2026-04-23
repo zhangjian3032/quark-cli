@@ -36,6 +36,7 @@ DEFAULT_RULE = {
     "torrent_paused": False,   # torrent 动作: 添加后是否暂停
     "guangya_parent_id": "",   # guangya 动作: 保存目录 ID (空=根目录)
     "enabled": True,
+    "pre_check": "",             # 预检脚本路径 (插件模式, 返回 0 = 通过)
 }
 
 

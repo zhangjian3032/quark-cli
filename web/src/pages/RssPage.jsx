@@ -32,7 +32,7 @@ function SchedulerBadge({ running }) {
 function FeedModal({ feed, onClose, onSave }) {
   const isEdit = !!feed
   const [form, setForm] = useState({
-    name: '', feed_url: '', interval_minutes: 30,
+    name: '', feed_url: '', interval_minutes: 30, action_delay_seconds: 0,
     max_items_per_check: 50, dedupe_window_hours: 168,
     bot_notify: true, enabled: true,
     auth_passkey: '', auth_cookie: '',
@@ -51,6 +51,7 @@ function FeedModal({ feed, onClose, onSave }) {
         name: form.name.trim(),
         feed_url: form.feed_url.trim(),
         interval_minutes: Number(form.interval_minutes) || 30,
+        action_delay_seconds: Number(form.action_delay_seconds) || 0,
         max_items_per_check: Number(form.max_items_per_check) || 50,
         dedupe_window_hours: Number(form.dedupe_window_hours) || 168,
         bot_notify: form.bot_notify,
@@ -104,10 +105,13 @@ function FeedModal({ feed, onClose, onSave }) {
           {F('名称', 'name', 'text', '如: 电影天堂4K RSS')}
           {F('Feed URL *', 'feed_url', 'url', 'https://example.com/rss.xml')}
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             {F('检查间隔(分钟)', 'interval_minutes', 'number')}
             {F('每次最大条数', 'max_items_per_check', 'number')}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             {F('去重窗口(小时)', 'dedupe_window_hours', 'number')}
+            {F('动作间隔(秒)', 'action_delay_seconds', 'number', '0 = 不等待')}
           </div>
 
           <div className="border-t border-surface-3 pt-3 mt-3">
@@ -160,6 +164,7 @@ function RuleModal({ feedId, onClose, onSave }) {
     link_type: 'any', action: 'auto_save', save_path: '',
     torrent_client: '', torrent_save_path: '', torrent_category: '', torrent_tags: '', torrent_paused: false,
     guangya_parent_id: '',
+    pre_check: '',
   })
   const [saving, setSaving] = useState(false)
   const [previewing, setPreviewing] = useState(false)
@@ -293,8 +298,8 @@ function RuleModal({ feedId, onClose, onSave }) {
           {form.action === 'guangya' && (
             <div className="border-t border-surface-3 pt-3 mt-1 space-y-3">
               <span className="text-xs text-gray-500 block">光鸭云盘参数</span>
-              {F('保存目录 ID', 'guangya_parent_id', 'text', '留空保存到根目录')}
-              <div className="text-[10px] text-gray-600">链接类型建议选择 "磁力链接" 或 "Torrent 附件"</div>
+              {F('保存目录', 'guangya_parent_id', 'text', 'ID 或 文件夹名/路径 如: RSS下载')}
+              <div className="text-[10px] text-gray-600">支持文件夹名称/路径(如 "RSS下载" 或 "媒体/电影"), 不存在时自动创建。链接类型建议选择 "磁力链接" 或 "Torrent 附件"</div>
             </div>
           )}
 
@@ -315,6 +320,12 @@ function RuleModal({ feedId, onClose, onSave }) {
               </label>
             </div>
           )}
+
+          {/* 插件: 预检脚本 */}
+          <div className="border-t border-surface-3 pt-3 mt-1">
+            {F('Pre-check 脚本路径', 'pre_check', 'text', '/path/to/script.sh (返回0=通过)')}
+            <div className="text-[10px] text-gray-600 mt-0.5">可选 — 脚本通过环境变量接收 RSS_ITEM_TITLE / RSS_TARGET_LINK 等信息</div>
+          </div>
 
           {/* 预览匹配结果 */}
           <div className="border-t border-surface-3 pt-3">
@@ -606,6 +617,7 @@ function TestModal({ feed, onClose }) {
 
 function CheckResultModal({ result, onClose }) {
   const actions = result?.actions || []
+  const postActions = result?.post_actions || []
   const matched = result?.matched || 0
   const newItems = result?.new_items || 0
   const unmatchedItems = result?.unmatched_items || []

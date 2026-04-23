@@ -245,6 +245,20 @@ def run_discover_task(task_config, config_path=None):
             discover_result = source.discover(media_type, random_page, **discover_kwargs)
 
         candidates = discover_result.items
+
+        # 页码超出 total_pages 时, 在有效范围内重随机
+        if not candidates and random_page > 1:
+            total_pages = getattr(discover_result, "total_pages", 1) or 1
+            fallback_page = random.randint(1, max(1, min(total_pages, 20)))
+            logger.info("page=%d 无结果 (total_pages=%d), fallback page=%d",
+                        random_page, total_pages, fallback_page)
+            random_page = fallback_page
+            if actual_source == "douban":
+                discover_result = source.discover(media_type, fallback_page, **discover_kwargs)
+            else:
+                discover_result = source.discover(media_type, fallback_page, **discover_kwargs)
+            candidates = discover_result.items
+
         result["discovered"] = len(candidates)
 
         if not candidates:

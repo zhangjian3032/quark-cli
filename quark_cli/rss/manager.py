@@ -7,6 +7,7 @@ RSS 订阅管理器
 """
 
 import logging
+import os
 import sqlite3
 import threading
 import time
@@ -42,6 +43,8 @@ DEFAULT_FEED = {
     "rules": [],
 
     "max_items_per_check": 50,
+    "action_delay_seconds": 0,   # 每条匹配动作间隔秒数 (0 = 不等待)
+    "post_actions": [],          # 一轮完成后的后置动作列表
     "dedupe_window_hours": 168,      # 7 天
     "bot_notify": True,
 
@@ -100,7 +103,7 @@ def _get_seen_db(config_path):
             if config_path:
                 db_dir = os.path.dirname(os.path.abspath(config_path))
             else:
-                db_dir = os.path.join(os.path.expanduser("~"), ".config", "quark-cli")
+                db_dir = os.path.join(os.path.expanduser("~"), ".quark-cli")
             os.makedirs(db_dir, exist_ok=True)
             db_path = os.path.join(db_dir, "rss_seen.db")
             _seen_conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -160,6 +163,56 @@ def cleanup_seen(feed_id=None, keep_hours=168, config_path=None):
 # ═══════════════════════════════════════════════════
 #  Feed CRUD (操作 config.json)
 # ═══════════════════════════════════════════════════
+
+
+def _run_pre_check(script_path, match_result):
+    """执行 pre-check 脚本
+
+    脚本通过环境变量接收匹配信息:
+      RSS_ITEM_TITLE, RSS_ITEM_GUID, RSS_ITEM_LINK,
+      RSS_RULE_NAME, RSS_ACTION, RSS_LINK_TYPE
+
+    返回: True (脚本退出 0, 通过) / False (非 0, 拒绝)
+    """
+    import subprocess
+
+    if not os.path.isfile(script_path):
+        logger.warning("pre-check 脚本不存在: %s", script_path)
+        return False
+
+    env = dict(os.environ)
+    item = match_result.item
+    rule = match_result.rule
+    env["RSS_ITEM_TITLE"] = item.title or ""
+    env["RSS_ITEM_GUID"] = item.guid or ""
+    env["RSS_ITEM_LINK"] = item.link or ""
+    env["RSS_RULE_NAME"] = rule.get("name", "")
+    env["RSS_ACTION"] = rule.get("action", "")
+    env["RSS_LINK_TYPE"] = rule.get("link_type", "")
+
+    # 传递链接
+    links = match_result.get_target_links()
+    env["RSS_TARGET_LINK"] = links[0] if links else ""
+
+    try:
+        result = subprocess.run(
+            [script_path],
+            env=env,
+            capture_output=True, text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            logger.info("pre-check 拒绝 [%s]: exit=%d, stderr=%s",
+                        item.title[:60], result.returncode, result.stderr[:200])
+            return False
+        return True
+    except subprocess.TimeoutExpired:
+        logger.warning("pre-check 超时 (30s): %s", script_path)
+        return False
+    except Exception as e:
+        logger.warning("pre-check 异常: %s — %s", script_path, e)
+        return False
+
 
 class RssManager:
     """RSS 订阅管理器"""
@@ -331,6 +384,14 @@ class RssManager:
         if not feed:
             return {"error": "Feed 不存在: {}".format(feed_id_or_name)}
 
+        if not feed.get("enabled", True):
+            return {
+                "feed_id": feed.get("id", ""),
+                "feed_name": feed.get("name", ""),
+                "error": "Feed 已禁用，请先启用后再检查",
+                "new_items": 0, "matched": 0, "actions": [],
+            }
+
         return self._execute_check(feed, dry_run=dry_run)
 
     def _execute_check(self, feed, dry_run=False):
@@ -342,7 +403,9 @@ class RssManager:
             "feed_name": feed_name,
             "new_items": 0,
             "matched": 0,
+            "skipped": 0,
             "actions": [],
+            "unmatched_items": [],
             "error": "",
         }
 
@@ -369,32 +432,52 @@ class RssManager:
 
         # 2. 限制条目数
         items = feed_result.items[:feed.get("max_items_per_check", 50)]
-        result["new_items"] = len(items)
 
-        # 3. 去重
+        # 3. 去重 — 过滤已处理的 item
         seen_guids = get_seen_guids(feed_id, self.config_path)
+        new_items = [it for it in items if it.guid and it.guid not in seen_guids]
+        result["new_items"] = len(new_items)
+        result["skipped"] = len(items) - len(new_items)
 
         # 4. 规则匹配
         rules = feed.get("rules", [])
         if not rules:
-            # 无规则, 仅标记已见
-            for item in items:
-                if item.guid and item.guid not in seen_guids:
-                    mark_seen(feed_id, item.guid, item.title, self.config_path)
+            # 无规则 — 不标记 seen, 等用户配好规则后可重新匹配
             self._update_feed_state(
                 feed, error="",
                 etag=feed_result.etag,
                 last_modified=feed_result.last_modified,
                 last_item=items[0] if items else None,
             )
+            result["unmatched_items"] = [{
+                "title": it.title, "guid": it.guid,
+                "pub_date": it.pub_date.isoformat() if it.pub_date else None,
+                "reason": "无匹配规则",
+            } for it in new_items[:50]]
             return result
 
-        matches, unmatched_items = match_items_with_reasons(items, rules, seen_guids=seen_guids)
+        # 对新 item 执行匹配 (已去重, 不再传 seen_guids)
+        matches, unmatched_items = match_items_with_reasons(new_items, rules, seen_guids=None)
         result["matched"] = len(matches)
-        result["unmatched_items"] = unmatched_items[:50]  # 最多返回 50 条
+        result["unmatched_items"] = unmatched_items[:50]
 
         # 5. 执行动作
-        for match in matches:
+        delay_sec = float(feed.get("action_delay_seconds", 0) or 0)
+        for i, match in enumerate(matches):
+            # pre-check 插件
+            pre_script = match.rule.get("pre_check", "").strip()
+            if pre_script and not dry_run:
+                if not _run_pre_check(pre_script, match):
+                    result["actions"].append({
+                        "action": match.action,
+                        "item_title": match.item.title,
+                        "rule_name": match.rule.get("name", ""),
+                        "success": False,
+                        "detail": {"error": "pre-check 脚本拒绝: {}".format(pre_script)},
+                        "skipped_by_precheck": True,
+                    })
+                    continue
+
             if dry_run:
                 result["actions"].append({
                     "dry_run": True,
@@ -410,10 +493,18 @@ class RssManager:
             # 标记已处理
             mark_seen(feed_id, match.item.guid, match.item.title, self.config_path)
 
-        # 也标记未匹配但已检查的 item
-        for item in items:
-            if item.guid and item.guid not in seen_guids:
-                mark_seen(feed_id, item.guid, item.title, self.config_path)
+            # 动作间隔
+            if delay_sec > 0 and i < len(matches) - 1 and not dry_run:
+                time.sleep(delay_sec)
+
+        # 只标记匹配到的 item 为 seen
+        # 未匹配的不标记, 用户调整规则后可重新匹配
+
+        # 5.5 后置动作 (post_actions)
+        if not dry_run:
+            post_results = self._execute_post_actions(feed, result)
+            if post_results:
+                result["post_actions"] = post_results
 
         # 6. 更新状态
         saved_count = sum(
@@ -431,6 +522,123 @@ class RssManager:
 
         result["duration"] = round(time.time() - t0, 2)
         return result
+
+    def _execute_post_actions(self, feed, check_result):
+        """执行一轮检查完成后的后置动作"""
+        post_actions = feed.get("post_actions", [])
+        if not post_actions:
+            return []
+
+        success_actions = [a for a in check_result.get("actions", []) if a.get("success")]
+        if not success_actions:
+            return []
+
+        results = []
+        for pa in post_actions:
+            pa_type = pa.get("type", "")
+            try:
+                if pa_type == "guangya_copy":
+                    r = self._post_action_guangya_copy(pa, success_actions)
+                    results.append({"type": pa_type, **r})
+                else:
+                    results.append({"type": pa_type, "success": False, "error": "未知后置动作: {}".format(pa_type)})
+            except Exception as e:
+                logger.exception("后置动作异常: %s", pa_type)
+                results.append({"type": pa_type, "success": False, "error": str(e)})
+        return results
+
+    def _post_action_guangya_copy(self, pa_config, success_actions):
+        """光鸭云盘拷贝后置动作
+
+        配置格式:
+            {
+                "type": "guangya_copy",
+                "source_dir": "RSS下载",       # 源目录名或 ID
+                "dest_dir": "媒体库/电影",      # 目标目录名/路径或 ID
+                "delete_after_copy": false,     # 拷贝完是否删除源文件
+            }
+        """
+        from quark_cli.config import ConfigManager
+        from quark_cli.guangya_api import GuangyaAPI
+
+        cfg = ConfigManager(self.config_path)
+        cfg.load()
+        gy_cfg = cfg.data.get("guangya", {})
+        refresh_token = gy_cfg.get("refresh_token", "")
+        if not refresh_token:
+            return {"success": False, "error": "未配置光鸭云盘 refresh_token"}
+
+        client = GuangyaAPI(refresh_token=refresh_token)
+        if not client.init():
+            return {"success": False, "error": "光鸭云盘凭证无效"}
+
+        # 解析源目录
+        source_dir = pa_config.get("source_dir", "").strip()
+        source_id = self._resolve_guangya_dir(client, source_dir)
+        if source_id is None:
+            return {"success": False, "error": "源目录不存在: {}".format(source_dir)}
+
+        # 解析目标目录
+        dest_dir = pa_config.get("dest_dir", "").strip()
+        dest_id = self._resolve_guangya_dir(client, dest_dir, auto_create=True)
+        if dest_id is None:
+            return {"success": False, "error": "目标目录解析失败: {}".format(dest_dir)}
+
+        # 列出源目录下所有文件
+        ls_result = client.ls_dir(parent_id=source_id, page_size=200)
+        if not client._ok(ls_result):
+            return {"success": False, "error": "列出源目录失败"}
+
+        file_list = ls_result.get("data", {}).get("list", [])
+        if not file_list:
+            return {"success": True, "copied": 0, "message": "源目录为空"}
+
+        file_ids = [f["fileId"] for f in file_list]
+
+        # 拷贝
+        copy_resp = client.copy_file(file_ids, dest_parent_id=dest_id)
+        if not client._ok(copy_resp):
+            return {"success": False, "error": "拷贝失败: {}".format(copy_resp.get("msg", "unknown"))}
+
+        result = {"success": True, "copied": len(file_ids)}
+
+        # 拷贝完删除源文件
+        if pa_config.get("delete_after_copy", False):
+            del_resp = client.delete(file_ids, wait=True)
+            if client._ok(del_resp):
+                result["deleted"] = len(file_ids)
+            else:
+                result["delete_error"] = del_resp.get("msg", "删除失败")
+
+        return result
+
+    @staticmethod
+    def _resolve_guangya_dir(client, dir_spec, auto_create=False):
+        """解析光鸭目录: 支持 ID 或路径名
+
+        如果 dir_spec 看起来像 ID (纯数字或含特定格式), 直接使用;
+        否则按路径名逐级查找/创建.
+        """
+        if not dir_spec:
+            return ""  # 根目录
+
+        # 如果是纯数字或像 file ID 格式, 直接作为 ID
+        if dir_spec.isdigit() or len(dir_spec) > 20:
+            return dir_spec
+
+        # 否则按路径名解析
+        if auto_create:
+            return client.resolve_dir_path(dir_spec)
+        else:
+            # 逐级查找但不创建
+            parts = [p.strip() for p in dir_spec.replace("\\", "/").split("/") if p.strip()]
+            current_id = ""
+            for part in parts:
+                found = client.find_dir_by_name(part, parent_id=current_id)
+                if not found:
+                    return None
+                current_id = found
+            return current_id
 
     def _update_feed_state(self, feed, error="", etag="", last_modified="",
                            last_item=None, matched=0, saved=0):

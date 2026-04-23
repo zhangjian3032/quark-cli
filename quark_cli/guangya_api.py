@@ -321,6 +321,81 @@ class GuangyaAPI:
                 self._wait_task(task_id)
         return resp
 
+
+    def copy_file(self, file_ids: List[str], dest_parent_id: str = "", wait: bool = True) -> dict:
+        """复制文件/目录到目标目录
+
+        Args:
+            file_ids: 要复制的文件 ID 列表
+            dest_parent_id: 目标父目录 ID ("" = 根目录)
+            wait: 是否等待异步任务完成
+
+        Returns:
+            响应 dict
+        """
+        payload = {"fileIds": file_ids, "destParentId": dest_parent_id}
+        resp = self._request(self.SVC_FILE, "/v1/file/copy", payload)
+        if self._ok(resp) and wait:
+            task_id = resp.get("data", {}).get("taskId")
+            if task_id:
+                self._wait_task(task_id)
+        return resp
+
+    def move_file(self, file_ids: List[str], dest_parent_id: str = "", wait: bool = True) -> dict:
+        """移动文件/目录到目标目录
+
+        Args:
+            file_ids: 要移动的文件 ID 列表
+            dest_parent_id: 目标父目录 ID ("" = 根目录)
+            wait: 是否等待异步任务完成
+
+        Returns:
+            响应 dict
+        """
+        payload = {"fileIds": file_ids, "destParentId": dest_parent_id}
+        resp = self._request(self.SVC_FILE, "/v1/file/move", payload)
+        if self._ok(resp) and wait:
+            task_id = resp.get("data", {}).get("taskId")
+            if task_id:
+                self._wait_task(task_id)
+        return resp
+
+    def find_dir_by_name(self, name: str, parent_id: str = "") -> Optional[str]:
+        """按名称在指定目录下查找子目录, 返回 fileId 或 None"""
+        result = self.ls_dir(parent_id=parent_id, page_size=200)
+        if not self._ok(result):
+            return None
+        for item in result.get("data", {}).get("list", []):
+            if item.get("fileName") == name and item.get("fileType") == 0:
+                return item.get("fileId")
+        return None
+
+    def resolve_dir_path(self, path: str) -> Optional[str]:
+        """按路径字符串解析目录 ID, 如 "电影/2026"
+
+        从根目录开始逐级查找, 找不到则自动创建.
+
+        Returns:
+            目标目录的 fileId, 失败返回 None
+        """
+        parts = [p.strip() for p in path.replace("\\", "/").split("/") if p.strip()]
+        if not parts:
+            return ""  # 根目录
+        current_id = ""
+        for part in parts:
+            found = self.find_dir_by_name(part, parent_id=current_id)
+            if found:
+                current_id = found
+            else:
+                # 自动创建
+                new_dir = self.mkdir(part, parent_id=current_id)
+                if not new_dir:
+                    return None
+                current_id = new_dir.get("fileId", "")
+                if not current_id:
+                    return None
+        return current_id
+
     def _wait_task(self, task_id: str, timeout: int = 120) -> bool:
         """等待异步任务完成
 

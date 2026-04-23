@@ -41,6 +41,7 @@ def scheduler_task_create(data: dict = Body(...)):
     task = {
         "name": data.get("name", "自动发现"),
         "enabled": data.get("enabled", True),
+        "source": data.get("source", "tmdb"),
         "interval_minutes": data.get("interval_minutes", 360),
         "cron": data.get("cron", ""),
         "media_type": data.get("media_type", "movie"),
@@ -74,7 +75,7 @@ def scheduler_task_update(index: int, data: dict = Body(...)):
 
     # 合并更新
     task = tasks[index]
-    for key in ["name", "enabled", "interval_minutes", "cron", "media_type",
+    for key in ["name", "enabled", "source", "interval_minutes", "cron", "media_type",
                 "count", "filters", "save_base_path", "check_media_lib",
                 "bot_notify", "notify_open_id"]:
         if key in data:

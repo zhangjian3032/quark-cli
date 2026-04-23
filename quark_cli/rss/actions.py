@@ -324,8 +324,9 @@ def _action_guangya(match_result, config_path):
     if not info:
         return {"success": False, "error": "光鸭云盘凭证无效"}
 
-    # 2. 保存目录
-    parent_id = rule.get("guangya_parent_id", "") or ""
+    # 2. 保存目录 (支持 ID 或文件夹名称/路径)
+    parent_spec = rule.get("guangya_parent_id", "") or ""
+    parent_id = _resolve_guangya_parent(client, parent_spec)
 
     # 3. 获取目标链接
     target_links = match_result.get_target_links()
@@ -437,6 +438,28 @@ def _action_guangya(match_result, config_path):
     except Exception as e:
         logger.exception("光鸭云添加异常: %s", item.title)
         return {"success": False, "error": str(e), "url": link[:120]}
+
+
+
+
+def _resolve_guangya_parent(client, parent_spec):
+    """解析光鸭保存目录: 支持 fileId 或 文件夹名称/路径
+
+    - 空字符串 → 根目录
+    - 纯数字或长字符串 → 视为 fileId 直接使用
+    - 其他 → 按路径逐级查找/创建 (如 "RSS下载" 或 "媒体/电影")
+    """
+    if not parent_spec:
+        return ""
+    # 如果看起来是 ID (纯数字或超长), 直接使用
+    if parent_spec.isdigit() or len(parent_spec) > 20:
+        return parent_spec
+    # 按路径名解析, 不存在则自动创建
+    resolved = client.resolve_dir_path(parent_spec)
+    if resolved is not None:
+        return resolved
+    logger.warning("光鸭目录解析失败, 将保存到根目录: %s", parent_spec)
+    return ""
 
 
 def _action_notify(match_result, config_path):

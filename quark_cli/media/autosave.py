@@ -338,6 +338,35 @@ def auto_save_pipeline(
     }
 
 
+def _collect_share_files(quark_client, pwd_id, stoken, pdir_fid, max_depth=5):
+    """
+    递归获取分享链接下所有文件 (展平子目录)。
+    解决分享中存在 S01/ 等子文件夹导致文件无法被识别和选择的问题。
+
+    Returns:
+        list: 所有非目录文件的列表
+    """
+    if max_depth <= 0:
+        return []
+
+    detail = quark_client.get_share_detail(pwd_id, stoken, pdir_fid)
+    if detail.get("code") != 0:
+        return []
+
+    items = detail["data"]["list"]
+    result = []
+    for item in items:
+        if item.get("dir"):
+            # 递归进入子目录
+            sub_files = _collect_share_files(
+                quark_client, pwd_id, stoken, item["fid"], max_depth - 1
+            )
+            result.extend(sub_files)
+        else:
+            result.append(item)
+    return result
+
+
 def _try_save_one(
     quark_client, share_url, save_path,
     pattern=".*", replace="",
@@ -377,11 +406,22 @@ def _try_save_one(
     if not file_list:
         return dict(_empty, error="分享中无文件")
 
-    # 若只有一个文件夹，自动进入
-    if len(file_list) == 1 and file_list[0].get("dir"):
-        sub = quark_client.get_share_detail(pwd_id, stoken, file_list[0]["fid"])
-        if sub.get("code") == 0 and sub["data"]["list"]:
-            file_list = sub["data"]["list"]
+    # 递归展开所有子目录 (解决 S01/ 等嵌套目录结构)
+    has_dirs = any(f.get("dir") for f in file_list)
+    if has_dirs:
+        dbg.log("AutoSave", "分享中包含子目录, 递归展开获取所有文件")
+        all_flat_files = []
+        for f in file_list:
+            if f.get("dir"):
+                sub_files = _collect_share_files(
+                    quark_client, pwd_id, stoken, f["fid"], max_depth=4
+                )
+                all_flat_files.extend(sub_files)
+            else:
+                all_flat_files.append(f)
+        if all_flat_files:
+            file_list = all_flat_files
+            dbg.log("AutoSave", "展开后共 {} 个文件".format(len(file_list)))
 
     # ── 智能选择 (如果提供了 media_title) ──
     use_smart = bool(media_title)
