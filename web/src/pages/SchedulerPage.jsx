@@ -3,7 +3,7 @@ import {
   Clock, Play, Pause, Plus, Trash2, Settings, Loader2,
   Film, Tv, Zap, CheckCircle2, XCircle, AlertCircle,
   RotateCcw, ChevronDown, ChevronRight, Bot, Bell,
-  Search, Library, Filter, Shuffle, Power,
+  Search, Library, Filter, Shuffle, Power, Calendar,
 } from 'lucide-react'
 import { schedulerApi, discoveryApi } from '../api/client'
 import { PageHeader, ErrorBanner } from '../components/UI'
@@ -377,6 +377,24 @@ function TaskCard({ task, index, status, onToggle, onTrigger, onEdit, onDelete }
           </button>
         </div>
       </div>
+
+      {/* 调度时间 */}
+      {task.enabled && status && (
+        <div className="px-4 pb-2 flex items-center gap-4 text-[10px] text-gray-500">
+          {status.last_run && (
+            <span className="flex items-center gap-1">
+              <Clock size={10} className="text-gray-600" />
+              上次: {new Date(status.last_run).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })}
+            </span>
+          )}
+          {status.next_run && (
+            <span className="flex items-center gap-1 text-brand-400">
+              <Calendar size={10} />
+              下次: {new Date(status.next_run).toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* 筛选标签 */}
       {Object.keys(task.filters || {}).length > 0 && (

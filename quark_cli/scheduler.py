@@ -120,6 +120,53 @@ def _should_run_cron(task, last_run):
     return True
 
 
+
+
+def _calc_next_run(task, last_run):
+    """计算任务的下一次触发时间
+
+    Returns:
+        datetime 或 None (无法确定时)
+    """
+    now = datetime.now()
+    cron = task.get("cron", "")
+
+    if cron:
+        parts = cron.strip().split()
+        if len(parts) >= 2:
+            try:
+                minute = int(parts[0])
+                hour = int(parts[1])
+            except (ValueError, IndexError):
+                return None
+
+            today_target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+            # 今天已过触发时间且已执行 → 明天
+            if now >= today_target and last_run and last_run.date() == now.date() and last_run >= today_target:
+                return today_target + timedelta(days=1)
+
+            # 今天还没到触发时间 → 今天
+            if now < today_target:
+                return today_target
+
+            # 今天已过触发时间但未执行 → 即将触发（下个调度循环）
+            return now
+
+        return None
+
+    # interval 模式
+    interval = _parse_interval(task)
+    if last_run:
+        next_time = last_run + timedelta(seconds=interval)
+        if next_time <= now:
+            return now  # 已经到了，下个循环就触发
+        return next_time
+
+    # 无 last_run → 等待一个完整周期
+    return now + timedelta(seconds=interval)
+
+
 # ── 创建数据源 ──
 
 
@@ -624,6 +671,20 @@ class AutoDiscoverScheduler:
     def _loop(self):
         time.sleep(30)
 
+        # 首次启动: 为所有任务初始化 _last_run，避免启动时立即触发
+        try:
+            tasks = self._load_tasks()
+            now = datetime.now()
+            for task in tasks:
+                name = task["name"]
+                if name not in self._last_run:
+                    # 无论 cron 还是 interval，都设置为当前时间
+                    # cron 任务: _should_run_cron 会认为今天已执行过，等到明天再触发
+                    # interval 任务: 等待一个完整间隔后再触发
+                    self._last_run[name] = now
+        except Exception:
+            logger.debug("初始化任务 last_run 失败", exc_info=True)
+
         while self._running:
             try:
                 tasks = self._load_tasks()
@@ -762,6 +823,8 @@ class AutoDiscoverScheduler:
 
         for task in all_tasks:
             name = task["name"]
+            last_run_dt = self._last_run.get(name)
+            next_run_dt = _calc_next_run(task, last_run_dt) if task.get("enabled", True) else None
             tasks.append({
                 "name": name,
                 "enabled": task.get("enabled", True),
@@ -771,7 +834,8 @@ class AutoDiscoverScheduler:
                 "media_type": task.get("media_type", "movie"),
                 "count": task.get("count", 3),
                 "filters": task.get("filters", {}),
-                "last_run": self._last_run.get(name, "").isoformat() if self._last_run.get(name) else None,
+                "last_run": last_run_dt.isoformat() if last_run_dt else None,
+                "next_run": next_run_dt.isoformat() if next_run_dt else None,
                 "running": name in self._task_threads and self._task_threads[name].is_alive(),
                 "last_result": self._results.get(name),
             })
