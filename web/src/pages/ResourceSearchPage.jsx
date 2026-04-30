@@ -198,7 +198,7 @@ function MetaHint({ keyword, onSelectPath }) {
 
   return (
     <div className="bg-brand-500/5 border border-brand-500/15 rounded-lg p-4 mb-4">
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2 sm:gap-3">
         {/* Poster thumbnail */}
         {m.poster_url && (
           <img src={m.poster_url} alt="" className="w-12 h-18 rounded object-cover flex-shrink-0" />
@@ -626,7 +626,7 @@ function SharePreview({ url, keyword, suggestedPath, onSaved }) {
           <Link size={16} className="text-brand-400 flex-shrink-0" />
           <span className="text-sm text-gray-300 truncate">{url}</span>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
           {/* 一键转存 */}
           {suggestedPath && (
             <button
@@ -1064,7 +1064,7 @@ export default function ResourceSearchPage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm text-green-400 font-mono truncate">
+                        <span className="text-xs sm:text-sm text-green-400 font-mono truncate max-w-[200px] sm:max-w-none">
                           {item.url}
                         </span>
                         <a
@@ -1089,7 +1089,7 @@ export default function ResourceSearchPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
                       {suggestedPath && (
                         <button
                           onClick={(e) => {

@@ -36,9 +36,9 @@ export function ErrorBanner({ message, onRetry }) {
 
 export function PageHeader({ title, description, children }) {
   return (
-    <div className="flex items-center justify-between mb-6">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 sm:mb-6 gap-2">
       <div>
-        <h1 className="text-2xl font-bold text-white">{title}</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">{title}</h1>
         {description && <p className="text-sm text-gray-500 mt-1">{description}</p>}
       </div>
       {children}

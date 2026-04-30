@@ -131,7 +131,7 @@ export default function DashboardPage() {
       </div>
 
       {/* 顶部统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 xs:grid-cols-2 md:grid-cols-5 gap-3 sm:gap-4">
         <StatCard icon={User} label="账号"
           value={acct.nickname || (acct.error ? '未连接' : '—')}
           sub={acct.vip_type || ''}
@@ -212,7 +212,7 @@ export default function DashboardPage() {
         <h2 className="text-sm font-semibold text-gray-300 mb-4 flex items-center gap-2">
           <TrendingUp className="w-4 h-4" /> 最近 7 天
         </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-4">
           <div className="bg-surface-2 rounded-lg p-3 text-center">
             <div className="text-2xl font-bold">{hist.total || 0}</div>
             <div className="text-xs text-gray-500 mt-1">总执行次数</div>

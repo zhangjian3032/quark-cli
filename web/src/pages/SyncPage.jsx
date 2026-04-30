@@ -188,7 +188,7 @@ function SyncTaskCard({ task, index, onChange, onRemove, onDuplicate }) {
             type="text" value={task.name || ''}
             onChange={e => onChange({ ...task, name: e.target.value })}
             placeholder="任务名称"
-            className="bg-transparent border-b border-surface-3 focus:border-brand-500 outline-none text-sm font-medium px-1 py-0.5 w-40" />
+            className="bg-transparent border-b border-surface-3 focus:border-brand-500 outline-none text-sm font-medium px-1 py-0.5 w-24 sm:w-40" />
           <button onClick={() => onChange({ ...task, enabled: !task.enabled })}
             className={`p-1 rounded transition ${task.enabled !== false ? 'text-green-400' : 'text-gray-600'}`}
             title={task.enabled !== false ? '已启用' : '已禁用'}>
@@ -219,13 +219,13 @@ function SyncTaskCard({ task, index, onChange, onRemove, onDuplicate }) {
       <div className="flex items-center gap-2">
         <div className="flex items-center text-xs text-gray-400 gap-4">
           <Folder className="w-3.5 h-3.5 text-gray-600 shrink-0" />
-          <span className="truncate max-w-[140px]">{task.source || '...'}</span>
+          <span className="truncate max-w-[80px] sm:max-w-[140px]">{task.source || '...'}</span>
           <ArrowRight className="w-3 h-3 text-gray-600 shrink-0" />
-          <span className="truncate max-w-[140px]">{task.dest || '...'}</span>
+          <span className="truncate max-w-[80px] sm:max-w-[140px]">{task.dest || '...'}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-4 flex-wrap">
+      <div className="flex items-center gap-3 sm:gap-4 flex-wrap">
         <label className="flex items-center gap-2 text-xs text-gray-500 cursor-pointer">
           <input type="checkbox" checked={task.delete_after_sync || false}
             onChange={e => onChange({ ...task, delete_after_sync: e.target.checked })}
@@ -539,9 +539,9 @@ export default function SyncPage() {
               <span className="text-xs text-gray-600 font-mono w-5">#{i + 1}</span>
               <span className="font-medium text-gray-300 min-w-[80px]">{t.name}</span>
               <Folder className="w-3.5 h-3.5 text-brand-400 shrink-0" />
-              <span className="text-gray-400 truncate max-w-[200px]">{t.source}</span>
+              <span className="text-gray-400 truncate max-w-[100px] sm:max-w-[200px]">{t.source}</span>
               <ArrowRight className="w-3.5 h-3.5 text-gray-600 shrink-0" />
-              <span className="text-gray-400 truncate max-w-[200px]">{t.dest}</span>
+              <span className="text-gray-400 truncate max-w-[100px] sm:max-w-[200px]">{t.dest}</span>
               {t.delete_after_sync && (
                 <span className="text-[10px] text-yellow-500 flex items-center gap-0.5"><Trash2 className="w-3 h-3" />删除源</span>
               )}

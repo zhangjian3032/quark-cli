@@ -65,4 +65,18 @@
   .badge-blue { @apply badge bg-brand-900/40 text-brand-300; }
   .badge-green { @apply badge bg-emerald-900/40 text-emerald-300; }
   .badge-yellow { @apply badge bg-amber-900/40 text-amber-300; }
+
+  /* 移动端卡片内边距缩小 */
+  @media (max-width: 480px) {
+    .card {
+      @apply rounded-lg;
+    }
+  }
+
+  /* 移动端模态框安全区域 */
+  @supports (padding-bottom: env(safe-area-inset-bottom)) {
+    .fixed.inset-0 {
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+  }
 }

@@ -54,7 +54,7 @@ function TaskEditor({ task, onSave, onClose, genres }) {
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50"
          onClick={onClose}>
-      <div className="card p-6 w-full max-w-xl mx-4 max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="card p-4 sm:p-6 w-full max-w-xl mx-3 sm:mx-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <h3 className="text-lg font-semibold text-white mb-4">
           {task ? '编辑任务' : '新建定时任务'}
         </h3>
@@ -313,7 +313,7 @@ function TaskCard({ task, index, status, onToggle, onTrigger, onEdit, onDelete }
               </span>
             )}
           </div>
-          <div className="flex items-center gap-3 mt-0.5 text-[10px] text-gray-500">
+          <div className="flex items-center gap-2 sm:gap-3 mt-0.5 text-[10px] text-gray-500 flex-wrap">
             {task.source && task.source !== 'tmdb' && (
               <span className="px-1 py-0.5 rounded bg-green-500/10 text-green-400">
                 {task.source === 'douban' ? '豆瓣' : task.source}
@@ -610,7 +610,7 @@ export default function SchedulerPage() {
       {error && <ErrorBanner message={error} />}
 
       {/* 顶部操作栏 */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={handleSchedulerToggle}
