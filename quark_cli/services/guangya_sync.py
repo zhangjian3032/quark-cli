@@ -5,6 +5,7 @@ import time
 import uuid
 import threading
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger("quark_cli.guangya_sync")
@@ -19,11 +20,12 @@ class SyncTask:
     STATUS_FAILED = "failed"
     STATUS_CANCELLED = "cancelled"
 
-    def __init__(self, task_id: str, file_id: str, save_dir: str, file_name: str = ""):
+    def __init__(self, task_id: str, file_id: str, save_dir: str, file_name: str = "", concurrency: int = 3):
         self.task_id = task_id
         self.file_id = file_id
         self.save_dir = save_dir
         self.file_name = file_name  # 根目录/文件名
+        self.concurrency = concurrency  # 并发下载数
 
         self.status = self.STATUS_PENDING
         self.error = ""
@@ -88,6 +90,7 @@ class SyncTask:
             "current_file_bytes": self.current_file_bytes,
             "current_file_total": self.current_file_total,
             "progress": round(self.done_bytes / self.total_bytes * 100, 1) if self.total_bytes > 0 else 0,
+            "concurrency": self.concurrency,
             "log": self.log[-30:],  # 最近 30 条
         }
 
@@ -117,10 +120,19 @@ class SyncManager:
         self._tasks: Dict[str, SyncTask] = {}
         self._lock = threading.Lock()
 
-    def create_task(self, client, file_id: str, save_dir: str, skip_existing: bool = True) -> SyncTask:
-        """创建并启动一个 sync 任务"""
+    def create_task(self, client, file_id: str, save_dir: str, skip_existing: bool = True, concurrency: int = 3) -> SyncTask:
+        """创建并启动一个 sync 任务
+
+        Args:
+            client: GuangyaAPI 客户端
+            file_id: 远程文件/目录 ID
+            save_dir: 本地保存目录
+            skip_existing: 跳过已存在且大小一致的文件
+            concurrency: 并发下载线程数 (1~8, 默认 3)
+        """
+        concurrency = max(1, min(8, concurrency))
         task_id = uuid.uuid4().hex[:12]
-        task = SyncTask(task_id=task_id, file_id=file_id, save_dir=save_dir)
+        task = SyncTask(task_id=task_id, file_id=file_id, save_dir=save_dir, concurrency=concurrency)
 
         with self._lock:
             self._tasks[task_id] = task
@@ -215,15 +227,17 @@ class SyncManager:
                 task.finished_at = time.time()
                 return
 
-            # Phase 3: 逐文件下载
-            for file_info, rel_path in all_files:
+            # Phase 3: 并发下载文件
+            task._log(f"开始下载 (并发数: {task.concurrency})...")
+
+            def _download_one(file_info, rel_path):
+                """下载单个文件 (线程安全)"""
                 if task.is_cancelled:
-                    break
+                    return "cancelled"
 
                 local_path = os.path.join(base_dir, rel_path)
                 file_size = file_info.get("fileSize", 0)
-                file_id = file_info["fileId"]
-                file_name = file_info.get("fileName", "")
+                fid = file_info["fileId"]
 
                 # 跳过已存在且大小一致的文件
                 if skip_existing and os.path.exists(local_path):
@@ -233,20 +247,17 @@ class SyncManager:
                         task.skipped_files += 1
                         task.done_files += 1
                         task.done_bytes += file_size
-                        continue
+                        return "skipped"
 
-                task.current_file = rel_path
-                task.current_file_bytes = 0
-                task.current_file_total = file_size
                 task._log(f"下载: {rel_path} ({_fmt_bytes(file_size)})")
 
                 # 获取签名 URL
-                dl = client.download(file_id)
+                dl = client.download(fid)
                 if not dl or not dl.get("signedURL"):
                     task._log(f"❌ 获取下载链接失败: {rel_path}")
                     task.failed_files += 1
                     task.done_files += 1
-                    continue
+                    return "failed"
 
                 signed_url = dl["signedURL"]
 
@@ -266,19 +277,18 @@ class SyncManager:
                                 f.write(chunk)
                                 chunk_len = len(chunk)
                                 task.done_bytes += chunk_len
-                                task.current_file_bytes += chunk_len
 
                     if task.is_cancelled:
-                        # 清理不完整文件
                         if os.path.exists(local_path):
                             try:
                                 os.remove(local_path)
                             except OSError:
                                 pass
-                        break
+                        return "cancelled"
 
                     task.done_files += 1
                     task._log(f"✓ {rel_path}")
+                    return "done"
 
                 except Exception as e:
                     task._log(f"❌ 下载失败: {rel_path} — {e}")
@@ -289,6 +299,23 @@ class SyncManager:
                             os.remove(local_path)
                         except OSError:
                             pass
+                    return "failed"
+
+            # 使用线程池并发下载
+            with ThreadPoolExecutor(max_workers=task.concurrency) as executor:
+                futures = {}
+                for file_info, rel_path in all_files:
+                    if task.is_cancelled:
+                        break
+                    fut = executor.submit(_download_one, file_info, rel_path)
+                    futures[fut] = rel_path
+
+                for fut in as_completed(futures):
+                    if task.is_cancelled:
+                        # 取消剩余的 futures
+                        for pending_fut in futures:
+                            pending_fut.cancel()
+                        break
 
             # 完成
             if task.is_cancelled:

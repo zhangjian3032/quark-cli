@@ -218,10 +218,18 @@ def guangya_download_to_server(data: dict = Body(...)):
 
 @router.post("/guangya/sync/start")
 def guangya_sync_start(data: dict = Body(...)):
-    """创建 Sync 任务 — 递归下载目录/文件到服务端"""
+    """创建 Sync 任务 — 递归下载目录/文件到服务端
+
+    支持参数:
+        file_id: 远程文件/目录 ID
+        save_dir: 本地保存目录 (默认读配置)
+        skip_existing: 跳过已存在文件 (默认 True)
+        concurrency: 并发下载线程数 (1~8, 默认 3)
+    """
     file_id = data.get("file_id", "").strip()
     save_dir = data.get("save_dir", "").strip()
     skip_existing = data.get("skip_existing", True)
+    concurrency = int(data.get("concurrency", 3))
     if not file_id:
         raise HTTPException(status_code=400, detail="缺少 file_id 参数")
     if not save_dir:
@@ -231,7 +239,7 @@ def guangya_sync_start(data: dict = Body(...)):
         client = _get_client()
         from quark_cli.services.guangya_sync import get_sync_manager
         mgr = get_sync_manager()
-        task = mgr.create_task(client, file_id, save_dir, skip_existing=skip_existing)
+        task = mgr.create_task(client, file_id, save_dir, skip_existing=skip_existing, concurrency=concurrency)
         return task.to_dict()
     except HTTPException:
         raise

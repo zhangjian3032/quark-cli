@@ -363,6 +363,12 @@ function SyncTaskCard({ task, onCancel, onRemove }) {
           <span className="text-gray-500">速度:</span>{' '}
           <span className="text-gray-300">{task.speed_fmt || '-'}</span>
         </div>
+        {task.concurrency > 1 && (
+          <div>
+            <span className="text-gray-500">并发:</span>{' '}
+            <span className="text-gray-300">{task.concurrency} 线程</span>
+          </div>
+        )}
       </div>
 
       {/* Current file */}
@@ -558,12 +564,14 @@ export default function GuangyaPage() {
     }
   }
 
+  const [syncConcurrency, setSyncConcurrency] = useState(3)
+
   const handleSync = async (fileId, fileName) => {
     try {
       const resp = await fetch(`${API}/guangya/sync/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_id: fileId }),
+        body: JSON.stringify({ file_id: fileId, concurrency: syncConcurrency }),
       })
       if (!resp.ok) {
         const e = await resp.json().catch(() => ({}))
@@ -756,6 +764,22 @@ export default function GuangyaPage() {
               <RefreshCw size={16} className={syncLoading ? 'animate-spin' : ''} />
             </button>
           </div>
+          {/* 并发数设置 */}
+          <div className="flex items-center gap-3 mb-3 px-1">
+            <label className="text-xs text-gray-500 flex items-center gap-1.5">
+              新任务并发数:
+              <select value={syncConcurrency} onChange={e => setSyncConcurrency(Number(e.target.value))}
+                className="bg-surface-2 border border-surface-3 rounded px-2 py-0.5 text-xs text-gray-300 outline-none focus:border-brand-500">
+                <option value={1}>1 线程</option>
+                <option value={2}>2 线程</option>
+                <option value={3}>3 线程</option>
+                <option value={4}>4 线程</option>
+                <option value={5}>5 线程</option>
+                <option value={8}>8 线程</option>
+              </select>
+            </label>
+          </div>
+
           {syncTasks.length === 0 ? (
             <div className="bg-surface-1 border border-surface-3 rounded-xl p-8 text-center text-gray-500 text-sm">
               暂无 Sync 任务 — 在文件管理中点击 <FolderSync size={14} className="inline text-blue-400" /> 按钮开始
