@@ -609,6 +609,20 @@ class SyncEngine:
                 self._progress.copied_bytes += size  # 计入总进度
                 self._progress.files.append(fp)
                 logger.debug("跳过已存在: %s", fp.filename)
+
+                # 跳过的文件 = 目标端已有完整副本, 源文件可安全删除
+                if self.delete_after_sync:
+                    try:
+                        os.remove(fp.src)
+                        self._progress.deleted_files += 1
+                        logger.info("已删除源(已同步): %s", fp.filename)
+                        self._try_remove_empty_parents(fp.src)
+                    except OSError as e:
+                        logger.warning("删除源失败: %s — %s", fp.filename, e)
+                        self._progress.errors.append(
+                            "删除失败 {}: {}".format(fp.filename, e)
+                        )
+
                 self._notify()
                 continue
 
