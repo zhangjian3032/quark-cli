@@ -68,28 +68,56 @@ def _merge_defaults(task):
 # ── Cron 简易解析 ──
 
 def _parse_interval(task):
-    """从任务配置解析执行间隔 (秒)"""
+    """从任务配置解析执行间隔 (秒)
+
+    优先级: cron > interval_minutes > 默认 6 小时
+    cron 模式使用固定 86400 秒间隔，由 _should_run_cron() 判断是否到达触发时间。
+    """
+    # cron 优先 — 每日定时任务
+    cron = task.get("cron", "")
+    if cron:
+        # cron 模式: 返回固定的每日间隔，实际触发判断由 _should_run_cron 负责
+        return 86400
+
     if task.get("interval_minutes"):
         return int(task["interval_minutes"]) * 60
 
-    # 简易 cron: 只支持 "分 时 * * *" 形式 → 算作每日定时
-    cron = task.get("cron", "")
-    if cron:
-        parts = cron.strip().split()
-        if len(parts) >= 2:
-            try:
-                minute = int(parts[0])
-                hour = int(parts[1])
-                now = datetime.now()
-                target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                if target <= now:
-                    target += timedelta(days=1)
-                return max(int((target - now).total_seconds()), 60)
-            except (ValueError, IndexError):
-                pass
-
     # 默认 6 小时
     return 360 * 60
+
+
+def _should_run_cron(task, last_run):
+    """判断 cron 任务是否应该执行
+
+    仅支持 "分 时 * * *" 格式 (每日定时)。
+    返回 True 如果当前已过触发时间且今天尚未执行。
+    """
+    cron = task.get("cron", "")
+    if not cron:
+        return True  # 非 cron 任务，由 interval 逻辑控制
+
+    parts = cron.strip().split()
+    if len(parts) < 2:
+        return True
+
+    try:
+        minute = int(parts[0])
+        hour = int(parts[1])
+    except (ValueError, IndexError):
+        return True
+
+    now = datetime.now()
+    today_target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+    # 还没到今天的触发时间
+    if now < today_target:
+        return False
+
+    # 已到触发时间 — 检查今天是否已执行过
+    if last_run and last_run.date() == now.date() and last_run >= today_target:
+        return False
+
+    return True
 
 
 # ── 创建数据源 ──
@@ -356,7 +384,9 @@ def run_discover_task(task_config, config_path=None):
                     pass
 
             keywords = suggest_search_keywords(detail_item)
-            paths = suggest_save_path(detail_item, base_path=base_path)
+            # 读取平铺路径配置，确保定时任务也尊重用户的 flat_save_path 设置
+            flat_mode = cfg.data.get("autosave", {}).get("flat_save_path", False)
+            paths = suggest_save_path(detail_item, base_path=base_path, flat=flat_mode)
             save_path = paths[0]["path"] if paths else "{}/{}".format(base_path, title)
 
         except Exception:
@@ -604,7 +634,11 @@ class AutoDiscoverScheduler:
                     interval = _parse_interval(task)
                     last = self._last_run.get(name)
 
-                    if last and (now - last).total_seconds() < interval:
+                    # cron 模式: 使用精确的时间窗口判断
+                    if task.get("cron"):
+                        if not _should_run_cron(task, last):
+                            continue
+                    elif last and (now - last).total_seconds() < interval:
                         continue
 
                     if name in self._task_threads and self._task_threads[name].is_alive():

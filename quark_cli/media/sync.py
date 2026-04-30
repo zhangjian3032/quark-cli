@@ -517,7 +517,7 @@ class SyncEngine:
             reader_t.join(timeout=5)
             self._active_rsync_proc = None
 
-            if fp.status == "cancelled":
+            if fp.status == "error" and fp.error == "cancelled":
                 raise Exception("cancelled")
 
             if proc.returncode != 0:
