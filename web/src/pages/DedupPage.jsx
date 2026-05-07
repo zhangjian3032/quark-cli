@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { mediaApi } from '../api/client'
-import { Copy, Trash2, Star, AlertTriangle, HardDrive, RefreshCw, CheckCircle2 } from 'lucide-react'
+import { Copy, Trash2, Star, AlertTriangle, HardDrive, RefreshCw, CheckCircle2, CheckSquare, Square } from 'lucide-react'
 
 function formatSize(bytes) {
   if (!bytes || bytes <= 0) return '未知'
@@ -36,8 +36,13 @@ function ScoreBar({ score, maxScore = 350 }) {
   )
 }
 
-function DuplicateGroupCard({ group, index }) {
+function DuplicateGroupCard({ group, index, selectedEntries, onToggleEntry }) {
   const [expanded, setExpanded] = useState(false)
+
+  // 该组中可移除条目的 guid 列表
+  const removableGuids = group.entries.filter(e => !e.is_best).map(e => e.guid)
+  const selectedInGroup = removableGuids.filter(guid => selectedEntries.has(guid))
+  const allRemovableSelected = removableGuids.length > 0 && selectedInGroup.length === removableGuids.length
 
   return (
     <div className="bg-surface-1 border border-surface-3 rounded-xl overflow-hidden">
@@ -61,6 +66,11 @@ function DuplicateGroupCard({ group, index }) {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {selectedInGroup.length > 0 && (
+            <span className="text-xs text-brand-400 bg-brand-600/10 px-2 py-1 rounded">
+              已选 {selectedInGroup.length}
+            </span>
+          )}
           {group.saveable_size > 0 && (
             <span className="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded">
               可节省 {formatSize(group.saveable_size)}
@@ -78,36 +88,55 @@ function DuplicateGroupCard({ group, index }) {
       {/* Entries */}
       {expanded && (
         <div className="border-t border-surface-3 divide-y divide-surface-3">
-          {group.entries.map((entry, i) => (
-            <div key={entry.guid} className={`px-5 py-3 flex items-center gap-4 ${entry.is_best ? 'bg-green-500/5' : ''}`}>
-              {/* Rank & Badge */}
-              <div className="flex items-center gap-2 min-w-[90px]">
-                {entry.is_best ? (
-                  <Star className="w-4 h-4 text-green-400" />
-                ) : (
-                  <Trash2 className="w-4 h-4 text-red-400/60" />
-                )}
-                <QualityBadge
-                  text={entry.is_best ? '推荐保留' : '可移除'}
-                  variant={entry.is_best ? 'best' : 'removable'}
-                />
-              </div>
+          {group.entries.map((entry, i) => {
+            const isSelected = selectedEntries.has(entry.guid)
+            return (
+              <div key={entry.guid} className={`px-5 py-3 flex items-center gap-4 ${entry.is_best ? 'bg-green-500/5' : ''}`}>
+                {/* Checkbox (仅非最佳版本可选) */}
+                <div className="w-5 flex-shrink-0">
+                  {!entry.is_best && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onToggleEntry(entry.guid) }}
+                      className="text-gray-400 hover:text-white transition-colors"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-brand-400" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                </div>
 
-              {/* Quality Info */}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-white truncate">{entry.quality || '未识别'}</div>
-                <div className="text-xs text-gray-500 mt-0.5 truncate">{entry.title}</div>
-              </div>
+                {/* Rank & Badge */}
+                <div className="flex items-center gap-2 min-w-[90px]">
+                  {entry.is_best ? (
+                    <Star className="w-4 h-4 text-green-400" />
+                  ) : (
+                    <Trash2 className="w-4 h-4 text-red-400/60" />
+                  )}
+                  <QualityBadge
+                    text={entry.is_best ? '推荐保留' : '可移除'}
+                    variant={entry.is_best ? 'best' : 'removable'}
+                  />
+                </div>
 
-              {/* Score */}
-              <ScoreBar score={entry.score} />
+                {/* Quality Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-white truncate">{entry.quality || '未识别'}</div>
+                  <div className="text-xs text-gray-500 mt-0.5 truncate">{entry.title}</div>
+                </div>
 
-              {/* Size */}
-              <div className="text-xs text-gray-400 w-20 text-right">
-                {entry.size || '未知'}
+                {/* Score */}
+                <ScoreBar score={entry.score} />
+
+                {/* Size */}
+                <div className="text-xs text-gray-400 w-20 text-right">
+                  {entry.size || '未知'}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
@@ -120,6 +149,7 @@ export default function DedupPage() {
   const [error, setError] = useState('')
   const [libraries, setLibraries] = useState([])
   const [selectedLib, setSelectedLib] = useState('')
+  const [selectedEntries, setSelectedEntries] = useState(new Set())
 
   // 加载媒体库列表
   useEffect(() => {
@@ -132,6 +162,7 @@ export default function DedupPage() {
     setLoading(true)
     setError('')
     setData(null)
+    setSelectedEntries(new Set())
     try {
       const result = await mediaApi.dedup(selectedLib)
       setData(result)
@@ -141,6 +172,43 @@ export default function DedupPage() {
       setLoading(false)
     }
   }
+
+  // 获取所有可移除条目的 guid
+  const allRemovableGuids = (data?.duplicate_groups || []).flatMap(
+    g => g.entries.filter(e => !e.is_best).map(e => e.guid)
+  )
+
+  const isAllSelected = allRemovableGuids.length > 0 && allRemovableGuids.every(guid => selectedEntries.has(guid))
+  const isSomeSelected = selectedEntries.size > 0
+
+  const handleSelectAll = () => {
+    if (isAllSelected) {
+      // 全部取消
+      setSelectedEntries(new Set())
+    } else {
+      // 全部选中
+      setSelectedEntries(new Set(allRemovableGuids))
+    }
+  }
+
+  const handleToggleEntry = (guid) => {
+    setSelectedEntries(prev => {
+      const next = new Set(prev)
+      if (next.has(guid)) {
+        next.delete(guid)
+      } else {
+        next.add(guid)
+      }
+      return next
+    })
+  }
+
+  // 计算选中的总大小
+  const selectedSize = (data?.duplicate_groups || []).reduce((total, g) => {
+    return total + g.entries
+      .filter(e => selectedEntries.has(e.guid))
+      .reduce((sum, e) => sum + (e.size_bytes || 0), 0)
+  }, 0)
 
   const summary = data?.summary
 
@@ -211,6 +279,41 @@ export default function DedupPage() {
         </div>
       )}
 
+      {/* Batch Action Bar */}
+      {data && data.duplicate_groups?.length > 0 && (
+        <div className="flex items-center justify-between bg-surface-1 border border-surface-3 rounded-xl px-5 py-3">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSelectAll}
+              className="flex items-center gap-2 text-sm text-gray-400 hover:text-white transition-colors"
+            >
+              {isAllSelected ? (
+                <CheckSquare className="w-4 h-4 text-brand-400" />
+              ) : (
+                <Square className="w-4 h-4" />
+              )}
+              {isAllSelected ? '取消全选' : '全选可移除'}
+            </button>
+
+            {isSomeSelected && (
+              <span className="text-xs text-gray-500">
+                已选 {selectedEntries.size} 项 · {formatSize(selectedSize)}
+              </span>
+            )}
+          </div>
+
+          {isSomeSelected && (
+            <button
+              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-500
+                         text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              删除选中 ({selectedEntries.size})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Results */}
       {data && data.duplicate_groups?.length === 0 && (
         <div className="flex flex-col items-center justify-center py-12 text-gray-500">
@@ -223,7 +326,13 @@ export default function DedupPage() {
       {data && data.duplicate_groups?.length > 0 && (
         <div className="space-y-3">
           {data.duplicate_groups.map((group, i) => (
-            <DuplicateGroupCard key={group.key} group={group} index={i + 1} />
+            <DuplicateGroupCard
+              key={group.key}
+              group={group}
+              index={i + 1}
+              selectedEntries={selectedEntries}
+              onToggleEntry={handleToggleEntry}
+            />
           ))}
         </div>
       )}
