@@ -334,6 +334,12 @@ Web 面板:
                       help="仅搜索排序，不实际转存")
 
 
+    # media dedup  (同名多版本去重)
+    mdd = media_sub.add_parser("dedup", help="同名多版本去重检测 (发现重复影片)")
+    mdd.add_argument("-l", "--library", default="", help="指定媒体库名称或 GUID (不指定则扫描全部)")
+    mdd.add_argument("-v", "--verbose", action="store_true", default=False,
+                      help="显示详细信息 (含 GUID)")
+
     # ========== sync (WebDAV → NAS 同步) ==========
     sync_parser = subparsers.add_parser("sync", help="WebDAV 挂载目录 → NAS 本地文件同步")
     sync_sub = sync_parser.add_subparsers(dest="sync_action")

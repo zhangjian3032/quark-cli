@@ -1740,10 +1740,12 @@ def handle(args):
         _handle_person(args)
     elif action == "batch-save":
         _handle_batch_save(args)
+    elif action == "dedup":
+        _handle_dedup(args)
     elif action == "auto-save":
         _handle_auto_save(args)
     else:
-        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|person|batch-save|auto-save}")
+        error("用法: quark-cli media {login|status|config|lib|search|info|poster|export|playing|meta|discover|person|batch-save|auto-save|dedup}")
         print()
         print("  影视媒体中心管理 (支持 fnOS / Emby / Jellyfin / TMDB / 豆瓣)")
         print()
@@ -1762,3 +1764,48 @@ def handle(args):
         print("    auto-save 自动搜索+转存 (一键全流程)")
         print("    person    演员/人物发现 (搜索演员 + 参演作品)")
         print("    batch-save 批量搜索+转存 (多部影视一次搞定)")
+        print("    dedup      同名多版本去重检测 (发现+对比+推荐)")
+
+
+# ──────────────────────────────────────────────
+# dedup — 同名多版本去重检测
+# ──────────────────────────────────────────────
+
+def _handle_dedup(args):
+    """检测飞牛影视媒体库中同名不同版本的影片"""
+    from quark_cli.media.dedup import find_duplicates, format_report
+
+    try:
+        provider = _get_provider(args)
+    except Exception as e:
+        error("无法连接媒体中心: {}".format(e))
+        sys.exit(1)
+
+    library_guid = getattr(args, "library", "") or ""
+    verbose = getattr(args, "verbose", False)
+
+    if not is_json_mode():
+        info("正在扫描媒体库, 检测同名多版本影片...")
+
+    try:
+        groups = find_duplicates(
+            provider,
+            library_guid=library_guid,
+        )
+    except Exception as e:
+        error("去重检测失败: {}".format(e))
+        sys.exit(1)
+
+    if is_json_mode():
+        json_out({
+            "success": True,
+            "duplicate_groups": [g.to_dict() for g in groups],
+            "summary": {
+                "total_groups": len(groups),
+                "total_entries": sum(g.count for g in groups),
+                "total_saveable_bytes": sum(g.saveable_size for g in groups),
+            },
+        })
+    else:
+        report = format_report(groups, verbose=verbose)
+        print(report)
