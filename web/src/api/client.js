@@ -121,6 +121,7 @@ export const mediaApi = {
     request(`/media/items/${guid}?seasons=${seasons}&cast=${cast}`),
   posterUrl:   (guid)                  => request(`/media/items/${guid}/poster`),
   playing:     ()                      => request('/media/playing'),
+  dedup:       (library = '')           => request(`/media/dedup?library=${encodeURIComponent(library)}`),
 }
 
 // ── Discovery (TMDB / 豆瓣) ──

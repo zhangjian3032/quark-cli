@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Routes, Route, NavLink, useLocation } from 'react-router-dom'
-import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History, Menu, X, Tv, Rss, Download, Cloud } from 'lucide-react'
+import { Film, Star, Clapperboard, Activity, HardDrive, Globe, Settings, CalendarClock, FolderSync, LayoutDashboard, History, Menu, X, Tv, Rss, Download, Cloud, Copy } from 'lucide-react'
 import DashboardPage from './pages/DashboardPage'
 import HistoryPage from './pages/HistoryPage'
 import LibraryPage from './pages/LibraryPage'
@@ -18,6 +18,7 @@ import SubscriptionPage from './pages/SubscriptionPage'
 import RssPage from './pages/RssPage'
 import TorrentPage from './pages/TorrentPage'
 import GuangyaPage from './pages/GuangyaPage'
+import DedupPage from './pages/DedupPage'
 
 const NAV_SECTIONS = [
   {
@@ -42,6 +43,7 @@ const NAV_SECTIONS = [
       { to: '/library',  icon: Film,         label: '媒体库' },
       { to: '/discover', icon: Star,         label: '发现' },
       { to: '/meta',     icon: Clapperboard, label: '元数据' },
+      { to: '/dedup',    icon: Copy,         label: '去重检测' },
     ],
   },
   {
@@ -181,6 +183,7 @@ export default function App() {
             <Route path="/torrent" element={<TorrentPage />} />
             <Route path="/guangya" element={<GuangyaPage />} />
             <Route path="/sync" element={<SyncPage />} />
+            <Route path="/dedup" element={<DedupPage />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </div>

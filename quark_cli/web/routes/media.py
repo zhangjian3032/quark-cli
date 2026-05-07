@@ -121,3 +121,27 @@ def media_playing():
         return svc.get_play_records()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/media/dedup")
+def media_dedup(
+    library: str = Query("", description="媒体库 GUID (空=扫描全部)"),
+):
+    """同名多版本去重检测"""
+    from quark_cli.web.deps import get_media_provider
+    from quark_cli.media.dedup import find_duplicates
+
+    try:
+        provider = get_media_provider()
+        groups = find_duplicates(provider, library_guid=library)
+        return {
+            "success": True,
+            "duplicate_groups": [g.to_dict() for g in groups],
+            "summary": {
+                "total_groups": len(groups),
+                "total_entries": sum(g.count for g in groups),
+                "total_saveable_bytes": sum(g.saveable_size for g in groups),
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
