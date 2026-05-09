@@ -396,8 +396,13 @@ class SyncEngine:
         基于 rsync 的高性能文件拷贝
 
         调用系统 rsync 获得 zero-copy / sendfile 级别的拷贝性能。
-        先写入 dst_path + ".quark_tmp" 临时文件，完成后 rename 为正式文件。
         通过 --info=progress2 解析实时进度。
+
+        模式:
+          - delete_after_sync=True:  rsync 直接写目标 + --remove-source-files
+            让 rsync 自身在确认传输成功后删除源文件，对 FUSE/WebDAV 挂载最可靠。
+          - delete_after_sync=False: rsync 写临时文件(.quark_tmp)，完成后 rename。
+            保证目标目录不会出现半成品文件。
 
         使用独立线程读取 rsync stdout，避免 pipe buffer 满导致 rsync 进程阻塞。
         """
@@ -415,8 +420,14 @@ class SyncEngine:
         # 确保目标目录存在
         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
-        # 临时文件路径
-        tmp_path = dst_path + TEMP_SUFFIX
+        # 根据是否需要删除源文件选择不同策略
+        use_direct_mode = self.delete_after_sync
+        if use_direct_mode:
+            # 直接写目标文件, rsync --remove-source-files 负责删源
+            write_path = dst_path
+        else:
+            # 写临时文件, 完成后 rename
+            write_path = dst_path + TEMP_SUFFIX
 
         copy_start = time.time()
         proc = None
@@ -462,8 +473,12 @@ class SyncEngine:
             cmd = [
                 "rsync", "-a", "--no-compress",
                 "--info=progress2", "--no-inc-recursive",
-                src_path, tmp_path,
             ]
+            # delete_after_sync 模式: 让 rsync 自己删源文件
+            if use_direct_mode:
+                cmd.append("--remove-source-files")
+            cmd += [src_path, write_path]
+
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -524,12 +539,19 @@ class SyncEngine:
                 stderr = proc.stderr.read().decode("utf-8", errors="replace").strip()
                 raise OSError("rsync failed (code {}): {}".format(proc.returncode, stderr[:500]))
 
-            # rsync 写到了 tmp_path — rename 为正式文件 (原子操作)
-            self._safe_rename(tmp_path, dst_path)
+            # 非删除模式: rename 临时文件为正式文件
+            if not use_direct_mode:
+                self._safe_rename(write_path, dst_path)
 
             fp.status = "done"
             fp.copied = size  # 确保 100%
-            logger.info("已同步: %s (%s)", fp.filename, _format_size(size))
+
+            if use_direct_mode:
+                # rsync --remove-source-files 已删源, 记录删除计数
+                self._progress.deleted_files += 1
+                logger.info("已同步+删源: %s (%s)", fp.filename, _format_size(size))
+            else:
+                logger.info("已同步: %s (%s)", fp.filename, _format_size(size))
 
         except Exception as e:
             self._active_rsync_proc = None
@@ -544,12 +566,14 @@ class SyncEngine:
                 fp.error = str(e) if str(e) != "cancelled" else "cancelled"
                 if str(e) != "cancelled":
                     logger.error("同步失败: %s — %s", fp.filename, e)
-            # 删除不完整的临时文件
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except OSError:
-                pass
+            # 删除不完整的临时文件 (仅非直接模式)
+            if not use_direct_mode:
+                try:
+                    tmp_path = dst_path + TEMP_SUFFIX
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except OSError:
+                    pass
 
         return fp
 
@@ -618,7 +642,7 @@ class SyncEngine:
                         logger.info("已删除源(已同步): %s", fp.filename)
                         self._try_remove_empty_parents(fp.src)
                     except OSError as e:
-                        logger.warning("删除源失败: %s — %s", fp.filename, e)
+                        logger.warning("删除源失败: %s — %s (WebDAV/FUSE挂载可能不支持删除, 请手动清理)", fp.filename, e)
                         self._progress.errors.append(
                             "删除失败 {}: {}".format(fp.filename, e)
                         )
@@ -638,20 +662,27 @@ class SyncEngine:
                             if f.status in ("done", "skipped"))
                     )
 
-                # 即时删除: 每个文件拷贝成功后立即删除源文件
-                # 影视文件通常很大, 等全部拷完再删会长时间占用双倍空间
+                # 删除源文件:
+                #   - delete_after_sync 模式下, rsync --remove-source-files 已删除源
+                #     只需清理空父目录
+                #   - 若 rsync 未带 --remove-source-files (不应发生), 回退手动删
                 if self.delete_after_sync:
-                    try:
-                        os.remove(fp.src)
-                        self._progress.deleted_files += 1
-                        logger.info("已删除源: %s", fp.filename)
-                        # 向上逐级清理空目录 (不删源根目录)
+                    if not os.path.exists(fp.src):
+                        # rsync 已成功删除源文件, 清理空目录
                         self._try_remove_empty_parents(fp.src)
-                    except OSError as e:
-                        logger.warning("删除源失败: %s — %s", fp.filename, e)
-                        self._progress.errors.append(
-                            "删除失败 {}: {}".format(fp.filename, e)
-                        )
+                    else:
+                        # 回退: rsync 未删成功, 手动重试
+                        logger.warning("rsync 未删除源文件, 手动重试: %s", fp.filename)
+                        try:
+                            os.remove(fp.src)
+                            self._progress.deleted_files += 1
+                            logger.info("手动删除源成功: %s", fp.filename)
+                            self._try_remove_empty_parents(fp.src)
+                        except OSError as e:
+                            logger.warning("手动删除源也失败: %s — %s (请检查WebDAV挂载权限或文件是否被占用)", fp.filename, e)
+                            self._progress.errors.append(
+                                "删除失败 {}: {}".format(fp.filename, e)
+                            )
 
             elif fp.status == "error":
                 self._progress.error_files += 1
